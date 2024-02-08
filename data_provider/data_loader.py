@@ -558,12 +558,6 @@ class Dataset_Custom_Test(Dataset):
 
 
     def __len__(self):
-        # return len(self.data_x) - self.seq_len - self.pred_len + 1
-        # 注意：这里的__len__也需要做修改！！！
-        # 不然取数据的时候会超出范围
-        # return len(self.data_x) - (self.seq_len + self.pred_len + self.test_train_num - 1) - self.pred_len + 1
-        
-        # 这里还进一步需要根据use_nearest_data来绝对长度大小
         if not self.use_nearest_data and not self.use_further_data:
             return (len(self.data_x) - (self.pred_len + self.test_train_num - 1)) - self.seq_len - self.pred_len + 1
         else:
@@ -713,14 +707,7 @@ class Dataset_ETT_hour_Test(Dataset):
 
         return seq_x, seq_y, seq_x_mark, seq_y_mark
 
-    # 即：用当前数据能构造出几个样本
     def __len__(self):
-        # return len(self.data_x) - self.seq_len - self.pred_len + 1
-        # 注意：这里的__len__也需要做修改！！！
-        # 不然取数据的时候会超出范围
-        # return len(self.data_x) - (self.seq_len + self.pred_len + self.test_train_num - 1) - self.pred_len + 1
-        
-        # 这里还进一步需要根据use_nearest_data或use_further_data来修改长度大小
         if not self.use_nearest_data and not self.use_further_data:
             return (len(self.data_x) - (self.pred_len + self.test_train_num - 1)) - self.seq_len - self.pred_len + 1
         else:
@@ -835,7 +822,6 @@ class Dataset_ETT_minute_Test(Dataset):
             s_begin = index
             s_end = s_begin + (self.seq_len + self.pred_len + self.test_train_num - 1)
             
-            # 这里先算r_end再算r_begin了
             r_end = s_end + self.adapt_start_pos
             r_begin = r_end - self.pred_len - self.label_len
 
@@ -867,12 +853,6 @@ class Dataset_ETT_minute_Test(Dataset):
 
 
     def __len__(self):
-        # return len(self.data_x) - self.seq_len - self.pred_len + 1
-        # 注意：这里的__len__也需要做修改！！！
-        # 不然取数据的时候会超出范围
-        # return len(self.data_x) - (self.seq_len + self.pred_len + self.test_train_num - 1) - self.pred_len + 1
-        
-        # 这里还进一步需要根据use_nearest_data来绝对长度大小
         if not self.use_nearest_data and not self.use_further_data:
             return (len(self.data_x) - (self.pred_len + self.test_train_num - 1)) - self.seq_len - self.pred_len + 1
         else:

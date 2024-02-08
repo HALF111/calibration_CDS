@@ -36,10 +36,8 @@ class Exp_Main_Test(Exp_Basic):
     def __init__(self, args):
         super(Exp_Main_Test, self).__init__(args)
 
-        # 这个可以作为超参数来设置
         self.test_train_num = self.args.test_train_num
 
-        # 判断哪些channels是有周期性的
         data_path = self.args.data_path
         if "ETTh1" in data_path: selected_channels = [1,3]  # [1,3, 2,4,5,6]
         # if "ETTh1" in data_path: selected_channels = [7]
@@ -54,11 +52,11 @@ class Exp_Main_Test(Exp_Basic):
         # elif "weather" in data_path: selected_channels = [1,4,7,9,10]
         else: selected_channels = list(range(1, self.args.c_out))
         for channel in range(len(selected_channels)):
-            selected_channels[channel] -= 1  # 注意这里要读每个item变成item-1，而非item
+            selected_channels[channel] -= 1 
         
         self.selected_channels = selected_channels
-
-        # 判断各个数据集的周期是多久
+        
+        
         if "ETTh1" in data_path: period = 24
         elif "ETTh2" in data_path: period = 24
         elif "ETTm1" in data_path: period = 96
@@ -115,14 +113,12 @@ class Exp_Main_Test(Exp_Basic):
         return data_set, data_loader
 
 
-    # 别忘了这里要加一个用data_provider_at_test_time来提供的data
     def _get_data_at_test_time(self, flag):
         data_set, data_loader = data_provider_at_test_time(self.args, flag)
         return data_set, data_loader
 
 
     def _select_optimizer(self):
-        # ETSformer的优化器比较特别一点
         if self.args.model == 'ETSformer':
             if 'warmup' in self.args.lradj: lr = self.args.min_lr
             else: lr = self.args.learning_rate
@@ -674,16 +670,7 @@ class Exp_Main_Test(Exp_Basic):
             pred_before_adapt = pred.detach().cpu().clone().numpy()
             true_before_adapt = true.detach().cpu().clone().numpy()
             
-
-            # 先用原模型的预测值和标签值之间的error，做反向传播之后得到的梯度值gradient_0
-            # 并将这个gradient_0作为标准答案
-            # 然后，对测试样本做了adaptation之后，会得到一个gradient_1
-            # 那么对gradient_1和gradient_0之间做对比，
-            # 就可以得到二者之间的余弦值是多少（方向是否一致），以及长度上相差的距离有多少等等。
-            # params_answer = self.get_answer_grad(is_training_part_params, use_adapted_model,
-            #                                         lr, test_data, 
-            #                                         batch_x, batch_y, batch_x_mark, batch_y_mark,
-            #                                         setting)
+            
             if use_adapted_model:
                 seq_len = self.args.seq_len
                 pred_len = self.args.pred_len
@@ -713,18 +700,13 @@ class Exp_Main_Test(Exp_Basic):
             model_optim.zero_grad()  # 清空梯度
 
 
-            
-            # 选择出合适的梯度
-            # 注意：这里是减去梯度，而不是加上梯度！！！！！
-            # selected_channels = self.selected_channels
 
-            # 再获得未被选取的unselected_channels
             unselected_channels = list(range(self.args.c_out))
             for item in self.selected_channels:
                 unselected_channels.remove(item)
             
 
-            # 在这类我们需要先对adaptation样本的x和测试样本的x之间的距离做对比
+
             import torch.nn.functional as F
             
             if self.args.adapt_part_channels:  

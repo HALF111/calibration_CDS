@@ -16,48 +16,48 @@ def data_provider(args, flag):
     timeenc = 0 if args.embed != 'timeF' else 1
 
     if flag == 'test':
-        shuffle_flag = False  # 测试集无需做随机shuffle
-        drop_last = True  # 设置成True还是False？
+        shuffle_flag = False
+        drop_last = True
         batch_size = args.batch_size
         freq = args.freq
     elif flag == "test_with_batchsize_1":
         flag = "test"
         shuffle_flag = False
-        drop_last = True  # 设置成True还是False？
+        drop_last = True
         batch_size = 1
         freq=args.freq
     elif flag == "val_with_batchsize_1":
         flag = "val"
         shuffle_flag = True
-        drop_last = True  # 设置成True还是False？
+        drop_last = True
         batch_size = 1
         freq=args.freq
     elif flag == "train_without_shuffle":
         flag = "train"
-        shuffle_flag = False  # 为了做KNN的时候保持训练集中顺序，故而设成False
-        # drop_last = True  # 设置成True还是False？
-        drop_last = False  # 设置成True还是False？
+        shuffle_flag = False
+        # drop_last = True
+        drop_last = False
         batch_size = args.batch_size
         freq=args.freq
     elif flag == "val_without_shuffle":
         flag = "val"
-        shuffle_flag = False  # 为了做KNN的时候保持训练集中顺序，故而设成False
-        # drop_last = True  # 设置成True还是False？
-        drop_last = False  # 设置成True还是False？
+        shuffle_flag = False
+        # drop_last = True
+        drop_last = False
         batch_size = args.batch_size
         freq=args.freq
     elif flag == "test_without_shuffle":
         flag = "test"
-        shuffle_flag = False  # 为了做KNN的时候保持训练集中顺序，故而设成False
-        # drop_last = True  # 设置成True还是False？
-        drop_last = False  # 设置成True还是False？
+        shuffle_flag = False
+        # drop_last = True
+        drop_last = False
         batch_size = args.batch_size
         freq=args.freq
     elif flag == "all":
         flag = "all"
-        shuffle_flag = False  # 为了做KNN的时候保持训练集中顺序，故而设成False
-        # drop_last = True  # 设置成True还是False？
-        drop_last = False  # 设置成True还是False？
+        shuffle_flag = False
+        # drop_last = True
+        drop_last = False
         batch_size = args.all_data_batch_size
         freq=args.freq
     elif flag == 'pred':
@@ -67,7 +67,7 @@ def data_provider(args, flag):
         freq = args.detail_freq
         Data = Dataset_Pred
     else:  # flag == "train" or flga == "val"
-        shuffle_flag = True  # 注意：训练集/验证集数据是会随机shuffle的！！
+        shuffle_flag = True
         drop_last = True
         batch_size = args.batch_size
         freq = args.freq
@@ -101,24 +101,18 @@ def data_provider_at_test_time(args, flag):
         drop_last = True
         freq = args.freq
 
-        # 注意：因为我们要做TTT/TTA，所以一定要把batch_size设置成1 ！！！
-        # batch_size = 32
         # batch_size = 1
         batch_size = args.adapted_batch_size
-        # batch_size = 4
-        # batch_size = 2857
     elif flag == "val":
         shuffle_flag = False
         drop_last = False
         # drop_last = True
         freq = args.freq
 
-        # 注意：因为我们要做TTT/TTA，所以一定要把batch_size设置成1 ！！！
         batch_size = args.adapted_batch_size
         # batch_size = 32
 
 
-    # 再多一个use_nearest_data参数
     use_nearest_data = args.use_nearest_data
     use_further_data = args.use_further_data
     adapt_start_pos = args.adapt_start_pos
@@ -143,7 +137,6 @@ def data_provider_at_test_time(args, flag):
         timeenc=timeenc,
         freq=freq,
         test_train_num = args.test_train_num,
-        # 别忘了下面这两个参数
         use_nearest_data=use_nearest_data,
         use_further_data=use_further_data,
         adapt_start_pos=adapt_start_pos
