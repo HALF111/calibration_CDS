@@ -262,7 +262,7 @@ class Exp_Main_Test(Exp_Basic):
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                 f_dim = -1 if self.args.features == 'MS' else 0
-                # ? 是否需要对outputs取出最后一段？
+                # whether get the last part with length 'pred_len'?
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                 
@@ -304,7 +304,7 @@ class Exp_Main_Test(Exp_Basic):
 
         best_model_path = path + '/' + 'checkpoint.pth'
         
-        # 这里为了防止异常，需要做一些修改，要在torch.load后加上map_location='cuda:0'
+        # map_location='cuda:0'?
         # self.model.load_state_dict(torch.load(best_model_path))
         self.model.load_state_dict(torch.load(best_model_path, map_location='cuda:0'))
 
@@ -320,7 +320,7 @@ class Exp_Main_Test(Exp_Basic):
         preds = []
         trues = []
 
-        criterion = nn.MSELoss()  # 使用MSELoss
+        criterion = nn.MSELoss()
         loss_list = []
 
         test_time_start = time.time()
@@ -345,7 +345,7 @@ class Exp_Main_Test(Exp_Basic):
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
                 
-                # 记录预测开始时间
+                # recording time
                 prediction_time_start = time.time()
                 
                 # encoder - decoder
@@ -368,7 +368,7 @@ class Exp_Main_Test(Exp_Basic):
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                 f_dim = -1 if self.args.features == 'MS' else 0
-                # ? 是否需要对outputs取出最后一段？
+                # whether get the last part with length 'pred_len'?
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
 
@@ -377,11 +377,9 @@ class Exp_Main_Test(Exp_Basic):
                     outputs = outputs[:, :, self.selected_channels]
                     batch_y = batch_y[:, :, self.selected_channels]
 
-                # 计算MSE loss
+                # MSE loss
                 loss = criterion(outputs, batch_y)
                 loss_list.append(loss.item())
-                # print(loss)
-
 
                 outputs = outputs.detach().cpu().numpy()
                 batch_y = batch_y.detach().cpu().numpy()
@@ -392,7 +390,7 @@ class Exp_Main_Test(Exp_Basic):
                 preds.append(pred)
                 trues.append(true)
                 
-                # 记录预测开始时间
+                # recording time
                 prediction_time_end = time.time()
                 prediction_time += prediction_time_end - prediction_time_start
 
@@ -401,12 +399,6 @@ class Exp_Main_Test(Exp_Basic):
                     gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
                     pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
                     visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
-        
-        # file_name = f"batchsize_32_{setting}" if flag == 'test' else f"batchsize_1_{setting}"
-        # # 将adaptation前的loss、adaptation中逐样本做adapt后的loss、以及adaptation之后的loss做统计
-        # with open(f"./loss_before_and_after_adapt/{file_name}.txt", "w") as f:
-        #     for loss in loss_list:
-        #         f.write(f"{loss}\n")
 
 
         preds = np.array(preds)
@@ -425,12 +417,12 @@ class Exp_Main_Test(Exp_Basic):
         mae, mse, rmse, mape, mspe = metric(preds, trues)
         print('mse:{}, mae:{}'.format(mse, mae))
 
-        # f = open("result.txt", 'a')
-        # f.write(setting + "  \n")
-        # f.write('mse:{}, mae:{}'.format(mse, mae))
-        # f.write('\n')
-        # f.write('\n')
-        # f.close()
+        f = open("result.txt", 'a')
+        f.write(setting + "  \n")
+        f.write('mse:{}, mae:{}'.format(mse, mae))
+        f.write('\n')
+        f.write('\n')
+        f.close()
 
         # np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
         # np.save(folder_path + 'pred.npy', preds)
@@ -463,8 +455,6 @@ class Exp_Main_Test(Exp_Basic):
                 for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(cur_loader):
                     batch_x = batch_x.float().to(self.device)
                     batch_y = batch_y.float().to(self.device)
-                    
-                    # print(i)
 
                     batch_x_mark = batch_x_mark.float().to(self.device)
                     batch_y_mark = batch_y_mark.float().to(self.device)
@@ -508,7 +498,6 @@ class Exp_Main_Test(Exp_Basic):
                     if i % 100 == 0:
                         print(f"data {i} have been calculated, cost time: {time.time() - test_time_start}s")
                         print('mse:{}, mae:{}'.format(mse, mae))
-                        
             
 
             # result save
@@ -556,16 +545,10 @@ class Exp_Main_Test(Exp_Basic):
         error_per_pred_index = [[] for i in range(self.args.pred_len)]
 
         if self.args.use_amp:
-            scaler = torch.cuda.amp.GradScaler()  # 如果使用amp的话，还需要再生成一个scaler？
+            scaler = torch.cuda.amp.GradScaler()
 
-        criterion = nn.MSELoss()  # 使用MSELoss
+        criterion = nn.MSELoss()
         test_time_start = time.time()
-
-        # # result save
-        # folder_path = './test_results/' + setting + '/'
-        # if not os.path.exists(folder_path):
-        #     os.makedirs(folder_path)
-
 
         # 加载模型参数到self.model里
         self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
@@ -575,13 +558,11 @@ class Exp_Main_Test(Exp_Basic):
             print(f"The length of given weights is {len(weights_given)}")
         
 
-        # self.model.eval()
         for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
-            # if data_len - i <= self.args.batch_size: break
+            # manually drop last batch
             if data_len - i <= data_len % self.args.batch_size: break
             
-            # 从self.model拷贝下来cur_model，并设置为train模式
-            # self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
+            # copy from 'self.model' to 'cur_model'
             cur_model = copy.deepcopy(self.model)
             # cur_model.train()
             cur_model.eval()
@@ -594,6 +575,7 @@ class Exp_Main_Test(Exp_Basic):
                 cur_model.requires_grad_(False)
                 # print(cur_model)
                 for n_m, m in cur_model.named_modules():
+                    # TODO:这里改成map形式，用if-else-if太冗余了！！！
                     # print(n_m)
                     # 注意：这里的名字应当根据Autoformer模型而修改为"decoder.projection"
                     if self.args.model == 'ETSformer':
@@ -617,35 +599,29 @@ class Exp_Main_Test(Exp_Basic):
                             if lln in n_m:
                                 m.requires_grad_(True)
                                 for n_p, p in m.named_parameters():
-                                    if n_p in ['weight', 'bias']:  # weight is scale, bias is shift
+                                    if n_p in ['weight', 'bias']:  # weight means scale, bias means shift
                                         params.append(p)
                                         names.append(f"{n_m}.{n_p}")
                     else:
                         if linear_layer_name in n_m:
                             m.requires_grad_(True)
                             for n_p, p in m.named_parameters():
-                                if n_p in ['weight', 'bias']:  # weight is scale, bias is shift
+                                if n_p in ['weight', 'bias']:  # weight means scale, bias means shift
                                     params.append(p)
                                     names.append(f"{n_m}.{n_p}")
 
-                # Adam优化器
-                # model_optim = optim.Adam(params, lr=self.args.learning_rate*10 / (2**self.test_train_num))  # 使用Adam优化器
+                # set lr:
                 lr = self.args.learning_rate * self.args.adapted_lr_times
-                # model_optim = optim.Adam(params, lr=lr)  # 使用Adam优化器
-                
-                # 普通的SGD优化器？
-                model_optim = optim.SGD(params, lr=lr)
+                # changing Adam to SGD optimizer:
+                model_optim = optim.SGD(params, lr=lr)  # model_optim = optim.Adam(params, lr=lr)
             else:
                 cur_model.requires_grad_(True)
-                # model_optim = optim.Adam(cur_model.parameters(), lr=self.args.learning_rate*10 / (2**self.test_train_num))
-                # model_optim = optim.Adam(cur_model.parameters(), lr=self.args.learning_rate)
-                
+                # set lr:
                 lr = self.args.learning_rate * self.args.adapted_lr_times
-                # 使用普通的SGD优化器，而非Adam优化器
-                model_optim = optim.SGD(cur_model.parameters(), lr=lr)
+                # changing Adam to SGD optimizer:
+                model_optim = optim.SGD(cur_model.parameters(), lr=lr)  # model_optim = optim.Adam(cur_model.parameters(), lr=lr)
             
-
-            # tmp loss
+            # 1. loss before adaptation:
             # cur_model.eval()
             seq_len = self.args.seq_len
             pred_len = self.args.pred_len
@@ -661,16 +637,16 @@ class Exp_Main_Test(Exp_Basic):
             if self.args.adapt_part_channels:
                 pred = pred[:, :, self.selected_channels]
                 true = true[:, :, self.selected_channels]
-            # 获取adaptation之前的loss
             loss_before_adapt = criterion(pred, true)
             a1.append(loss_before_adapt.item())
             # cur_model.train()
             
-            # 存储原来的pred和true
+            # store 'pred' and 'true' before adaptation
             pred_before_adapt = pred.detach().cpu().clone().numpy()
             true_before_adapt = true.detach().cpu().clone().numpy()
             
             
+            # 2. get gradient with ground-truth
             if use_adapted_model:
                 seq_len = self.args.seq_len
                 pred_len = self.args.pred_len
@@ -687,24 +663,22 @@ class Exp_Main_Test(Exp_Basic):
             if self.args.adapt_part_channels:
                 pred_answer = pred_answer[:, :, self.selected_channels]
                 true_answer = true_answer[:, :, self.selected_channels]
-            # criterion = nn.MSELoss()  # 使用MSELoss
-            # 计算MSE loss
             loss_ans_before = criterion(pred_answer, true_answer)
             loss_ans_before.backward()
 
-            w_T = params[0].grad.T  # 先对weight参数做转置
-            b = params[1].grad.unsqueeze(0)  # 将bias参数扩展一维
-            params_answer = torch.cat((w_T, b), 0)  # 将w_T和b参数concat起来
-            params_answer = params_answer.ravel()  # 最后再展开成一维的，就得到了标准答案对应的梯度方向
+            w_T = params[0].grad.T
+            b = params[1].grad.unsqueeze(0)
+            params_answer = torch.cat((w_T, b), 0)
+            # get gradient with ground-truth, including W and b.
+            params_answer = params_answer.ravel()
 
-            model_optim.zero_grad()  # 清空梯度
+            model_optim.zero_grad()  # clear gradient
 
 
-
+            # channels without significant periodicity
             unselected_channels = list(range(self.args.c_out))
             for item in self.selected_channels:
                 unselected_channels.remove(item)
-            
 
 
             import torch.nn.functional as F
@@ -725,29 +699,21 @@ class Exp_Main_Test(Exp_Basic):
                         lookback_x = batch_x[:, ii : ii+seq_len, :].reshape(-1)
                     dist = F.pairwise_distance(test_x, lookback_x, p=2).item()
                     distance_pairs.append([ii, dist])
-                # 从其中随机筛选出selected_data_num个样本
+                # randomly select samples with the number of 'selected_data_num'
                 import random
                 selected_distance_pairs = random.sample(distance_pairs, self.args.selected_data_num)
             else:
                 for ii in range(self.args.test_train_num):
-                    # 只对周期性样本计算x之间的距离
-                    # if self.args.adapt_cycle:
-                    
-                    # PS：这里注释掉了adapt_cycle，相当于默认是加的；
-                    # 现在改用remove_cycle，如果加了才说明掉周期性；不加则保留
+                    # remove_cycle is used for ablation study
                     if not self.args.remove_cycle:
-                        # 为了计算当前的样本和测试样本间时间差是否是周期的倍数
-                        # 我们先计算时间差与周期相除的余数
+                        # phase difference between current sample and test sample
                         if 'illness' in self.args.data_path:
                             import math
                             cycle_remainer = math.fmod(self.args.test_train_num-1 + self.args.pred_len - ii, self.period)
                         else:
                             cycle_remainer = (self.args.test_train_num-1 + self.args.pred_len - ii) % self.period
-                        # 定义判定的阈值
+                        # threshold for decision
                         threshold = self.period * self.args.lambda_period
-                        # print(cycle_remainer, threshold)
-                        # 如果余数在[-threshold, threshold]之间，那么考虑使用其做fine-tune
-                        # 否则的话不将其纳入计算距离的数据范围内
                         if cycle_remainer > threshold or cycle_remainer < -threshold:
                             continue
                         
@@ -755,34 +721,31 @@ class Exp_Main_Test(Exp_Basic):
                         lookback_x = batch_x[:, ii : ii+seq_len, self.selected_channels].reshape(-1)
                     else:
                         lookback_x = batch_x[:, ii : ii+seq_len, :].reshape(-1)
-                        
+                    
+                    # calculate sample similarity
                     dist = F.pairwise_distance(test_x, lookback_x, p=2).item()
                     distance_pairs.append([ii, dist])
-
-                # 如果考虑距离计算，那么选距离最小；否则的话就选最近的（也即坐标最大的）：
+                
                 if not self.args.remove_distance:
-                    # 先按距离从小到大排序
+                    # select samples with higher similarity
                     cmp = lambda item: item[1]
                     distance_pairs.sort(key=cmp)
                 else:
+                    # select samples with closer timestep difference
                     cmp = lambda item: item[0]
                     distance_pairs.sort(key=cmp, reverse=True)
 
-                # 筛选出其中最小的selected_data_num个样本出来
+                # select 'selected_data_num' samples
                 selected_distance_pairs = distance_pairs[:self.args.selected_data_num]
                 
             selected_indices = [item[0] for item in selected_distance_pairs]
             selected_distances = [item[1] for item in selected_distance_pairs]
-            # print(f"selected_distance_pairs is: {selected_distance_pairs}")
 
             all_distances.append(selected_distances)
 
 
-            # 这个数组的内容是否需要预设？
-            # params_adapted = torch.zeros((1)).to(self.device)
             cur_grad_list = []
-            
-            # 开始训练
+
             for epoch in range(test_train_epochs):
 
                 gradients = []
@@ -790,7 +753,6 @@ class Exp_Main_Test(Exp_Basic):
 
                 # num_of_loss_per_update = 1
                 mean_loss = 0
-
 
                 for ii in selected_indices:
 
@@ -807,16 +769,11 @@ class Exp_Main_Test(Exp_Basic):
                         batch_x[:, ii : ii+seq_len, :], batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :], 
                         batch_x_mark[:, ii : ii+seq_len, :], batch_x_mark[:, ii+seq_len-label_len : ii+seq_len+pred_len, :])
 
-                    # 这里当batch_size为1还是32时
-                    # pred和true的size可能为[1, 24, 7]或[32, 24, 7]
-                    # 但是结果的loss值均只包含1个值
-                    # 这是因为criterion为MSELoss，其默认使用mean模式，会对32个loss值取一个平均值
-
                     if self.args.adapt_part_channels:
                         pred = pred[:, :, self.selected_channels]
                         true = true[:, :, self.selected_channels]
                     
-                    # 判断是否使用最近的数据
+                    # check whether use nearest data?
                     if not self.args.use_nearest_data or self.args.use_further_data:
                         loss = criterion(pred, true)
                     else:
@@ -825,7 +782,6 @@ class Exp_Main_Test(Exp_Basic):
                             loss = criterion(pred[:, :data_used_num, :], true[:, :data_used_num, :])
                         else:
                             loss = criterion(pred, true)
-                        # loss = criterion(pred, true)
 
                     # loss = criterion(pred, true)
                     mean_loss += loss
@@ -833,13 +789,8 @@ class Exp_Main_Test(Exp_Basic):
                     if self.args.use_amp:
                         scaler.scale(loss).backward()
                         scaler.step(model_optim)
-                        # scaler.step(model_optim_norm)
                         scaler.update()
                     else:
-                        # # pass
-                        # loss.backward()
-                        # model_optim.step()
-
                         loss.backward()
                         w_T = params[0].grad.T
                         b = params[1].grad.unsqueeze(0)
@@ -847,36 +798,32 @@ class Exp_Main_Test(Exp_Basic):
                         original_shape = params_tmp.shape
                         params_tmp = params_tmp.ravel()
 
-                        # 将该梯度存入cur_grad_list中
+                        # store the gradient in 'cur_grad_list'
                         cur_grad_list.append(params_tmp.detach().cpu().numpy())
 
                         model_optim.zero_grad()
-
-                    # 记录逐样本做了adaptation之后的loss
-                    # mean_loss += tmp_loss
-                    # mean_loss += loss
             
             
-            # 定义一个权重和梯度相乘函数
+            # dunction: multiply gradient by different weights
             def calc_weighted_params(params, weights):
                 results = 0
                 for i in range(len(params)):
                     results += params[i] * weights[i]
                 return results
             
-            # 权重分别乘到对应的梯度上
+            # multiply gradient by different weights 
             if weights_given:
                 weighted_params = calc_weighted_params(cur_grad_list, weights_given)
             else:
                 weights_all_ones = [1 for i in range(self.test_train_num)]
                 weighted_params = calc_weighted_params(cur_grad_list, weights_all_ones)
             
-            # 将weighted_params从np.array转成tensor
+            # tranform 'weighted_params' from np.array to tensor
             weighted_params = torch.tensor(weighted_params)
             weighted_params = weighted_params.to(self.device)
 
 
-            # 计算标准答案的梯度params_answer和adaptation加权后的梯度weighted_params之间的角度
+            # calculate the angle between the gradients of ground-truth and the weighted sum of current gradients
             import math
             product = torch.dot(weighted_params, params_answer)
             product = product / (torch.norm(weighted_params) * torch.norm(params_answer))
@@ -884,29 +831,28 @@ class Exp_Main_Test(Exp_Basic):
             all_angels.append(angel)
             
 
-            # 还原回原来的梯度
-            # 也即将weighted_params变回w_grad和b_grad
+            # change 'weighted_params' back to 'w_grad' and 'b_grad'
             weighted_params = weighted_params.reshape(original_shape)
             w_grad_T, b_grad = torch.split(weighted_params, [weighted_params.shape[0]-1, 1])
             w_grad = w_grad_T.T  # (7, 512)
             b_grad = b_grad.squeeze(0)  # (7)
 
 
-            # 设置新参数为原来参数 + 梯度值
+            # set new param as: original param + gradient
             from torch.nn.parameter import Parameter
             cur_lr = self.args.learning_rate * self.args.adapted_lr_times
 
-            # 将未选择的channels上的梯度置为0
+            # make gradients on unselected channels as 0
             if self.args.adapt_part_channels:
                 w_grad[unselected_channels, :] = 0
                 b_grad[unselected_channels] = 0
 
-            # 注意：这里是减去梯度，而不是加上梯度！！！！！
+            # Note: params should minus gradient, instead of adding gradients!
             if self.args.model == 'ETSformer':
                 cur_model.decoder.pred.weight = Parameter(cur_model.decoder.pred.weight - w_grad * cur_lr)
                 cur_model.decoder.pred.bias = Parameter(cur_model.decoder.pred.bias - b_grad * cur_lr)
             elif self.args.model == 'Crossformer':
-                # 因为decoder一共有e_layers+1层，所以其最后一层是{self.args.e_layers}
+                # There are e_layers+1 of layers in decoder in original Crossformer, so the last layer is self.args.e_layers
                 adapt_layer = cur_model.decoder.decode_layers[self.args.e_layers].linear_pred
                 adapt_layer.weight = Parameter(adapt_layer.weight - w_grad * cur_lr)
                 adapt_layer.bias = Parameter(adapt_layer.bias - b_grad * cur_lr)

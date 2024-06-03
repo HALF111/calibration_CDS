@@ -416,8 +416,8 @@ class Dataset_Custom_Test(Dataset):
     def __init__(self, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
                  target='OT', scale=True, timeenc=0, freq='h',
-                 use_nearest_data=False, use_further_data=False, adapt_start_pos = 1,  # 也别忘记use_nearest_data和adapt_start_pos参数
-                 test_train_num=1):  # 别忘记加上test_train_num参数！！
+                 use_nearest_data=False, use_further_data=False, adapt_start_pos = 1,
+                 test_train_num=1):  # add params: 'test_train_num', ''use_nearest_data' and 'adapt_start_pos'
         # size [seq_len, label_len, pred_len]
         # info
         if size == None:
@@ -442,9 +442,8 @@ class Dataset_Custom_Test(Dataset):
         self.root_path = root_path
         self.data_path = data_path
 
-        # 注意：别忘记要加这一句话！！
+        # set 'test_train_num'
         self.test_train_num = test_train_num
-        # 以及这一句话，加上use_nearest_data参数！！！
         self.use_nearest_data = use_nearest_data
         self.use_further_data = use_further_data
         self.adapt_start_pos = adapt_start_pos
@@ -468,7 +467,7 @@ class Dataset_Custom_Test(Dataset):
         num_test = int(len(df_raw) * 0.2)
         num_vali = len(df_raw) - num_train - num_test
 
-        # 别忘记这里也要做修改！！
+        # modify borders
         # border1s = [0, num_train - self.seq_len, len(df_raw) - num_test - self.seq_len]
         if not self.use_nearest_data and not self.use_further_data:
             border1s = [0, num_train - self.seq_len, len(df_raw) - num_test - (self.seq_len + self.pred_len + self.test_train_num - 1)]
@@ -511,7 +510,7 @@ class Dataset_Custom_Test(Dataset):
         if not self.use_nearest_data and not self.use_further_data:
             s_begin = index
             # s_end = s_begin + self.seq_len
-            # 注意这里要做一些修改！！！
+            # modify s_end
             s_end = s_begin + (self.seq_len + self.pred_len + self.test_train_num - 1)
             
             r_begin = s_end - self.label_len
@@ -526,21 +525,20 @@ class Dataset_Custom_Test(Dataset):
             s_begin = index
             s_end = s_begin + (self.seq_len + self.pred_len + self.test_train_num - 1)
             
-            # 这里先算r_end再算r_begin了
             r_end = s_end + self.adapt_start_pos
             r_begin = r_end - self.pred_len - self.label_len
 
-            seq_x = self.data_x[s_begin:s_end]  # (201, 7) ->（seq_len + pred_len + ttn - 1, channel）
-            seq_y = self.data_y[r_begin:r_end]  # (144, 7) -> (label_len + pred_len, channel)
+            seq_x = self.data_x[s_begin:s_end]  # (seq_len + pred_len + ttn - 1, channel)
+            seq_y = self.data_y[r_begin:r_end]  # (label_len + pred_len, channel)
             seq_x_mark = self.data_stamp[s_begin:s_end]
             seq_y_mark = self.data_stamp[r_begin:r_end]
 
             import copy
             seq_x = copy.deepcopy(seq_x)
             seq_x_mark = copy.deepcopy(seq_x_mark)
-            if self.adapt_start_pos < self.pred_len:  # 只有当start_pos小于pred_len时，才需要对后面补零
-                seq_x[-(self.pred_len-self.adapt_start_pos):, :] = 0  # 将seq_x最后面的(self.pred_len-self.adapt_start_pos)部分的值置为0
-                seq_x_mark[-(self.pred_len-self.adapt_start_pos):, :] = 0  # 同样也将seq_x_mark最后面的(self.pred_len-self.adapt_start_pos)部分的值置为0
+            if self.adapt_start_pos < self.pred_len:  # if start_pos < pred_len, padding zeros
+                seq_x[-(self.pred_len-self.adapt_start_pos):, :] = 0 
+                seq_x_mark[-(self.pred_len-self.adapt_start_pos):, :] = 0
         else:  # self.use_further_data
             s_begin = index
             s_mid = s_begin + (self.seq_len + self.pred_len + self.test_train_num - 1)
@@ -549,8 +547,8 @@ class Dataset_Custom_Test(Dataset):
             r_begin = s_end - self.label_len
             r_end = s_end + self.pred_len
 
-            seq_x = self.data_x[s_begin:s_end]  # (201, 7) ->（seq_len + pred_len + ttn - 1, channel）
-            seq_y = self.data_y[r_begin:r_end]  # (144, 7) -> (label_len + pred_len, channel)
+            seq_x = self.data_x[s_begin:s_end]  # (seq_len + pred_len + ttn - 1, channel)
+            seq_y = self.data_y[r_begin:r_end]  # (label_len + pred_len, channel)
             seq_x_mark = self.data_stamp[s_begin:s_end]
             seq_y_mark = self.data_stamp[r_begin:r_end]
 
@@ -572,8 +570,8 @@ class Dataset_ETT_hour_Test(Dataset):
     def __init__(self, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
                  target='OT', scale=True, timeenc=0, freq='h',
-                 use_nearest_data=False, use_further_data=False, adapt_start_pos = 1,  # 也别忘记use_nearest_data和adapt_start_pos参数
-                 test_train_num=1):  # 别忘记加上test_train_num参数！！
+                 use_nearest_data=False, use_further_data=False, adapt_start_pos = 1,
+                 test_train_num=1):  # add params: 'test_train_num', ''use_nearest_data' and 'adapt_start_pos'
         # size [seq_len, label_len, pred_len]
         # info
         if size == None:
@@ -598,9 +596,8 @@ class Dataset_ETT_hour_Test(Dataset):
         self.root_path = root_path
         self.data_path = data_path
 
-        # 注意：别忘记要加这一句话！！！
+        # add params
         self.test_train_num = test_train_num
-        # 以及这一句话，加上use_nearest_data参数！！！
         self.use_nearest_data = use_nearest_data
         self.use_further_data = use_further_data
         self.adapt_start_pos = adapt_start_pos
@@ -612,11 +609,11 @@ class Dataset_ETT_hour_Test(Dataset):
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
 
-        # 这里最好也做一次修改！！
+        # modify borders
         # border1s = [0, 12 * 30 * 24 - self.seq_len, 12 * 30 * 24 + 4 * 30 * 24 - self.seq_len]
         if not self.use_nearest_data and not self.use_further_data:
             border1s = [0, 12 * 30 * 24 - self.seq_len, 12 * 30 * 24 + 4 * 30 * 24 - (self.seq_len + self.pred_len + self.test_train_num - 1)]
-        else:  # 无论use_nearest_data还是use_further_data都是这么取数据
+        else:
             border1s = [0, 12 * 30 * 24 - self.seq_len, 12 * 30 * 24 + 4 * 30 * 24 - (self.seq_len + self.test_train_num + self.adapt_start_pos - 1)]
         border2s = [12 * 30 * 24, 12 * 30 * 24 + 4 * 30 * 24, 12 * 30 * 24 + 8 * 30 * 24]
         border1 = border1s[self.set_type]
@@ -652,17 +649,10 @@ class Dataset_ETT_hour_Test(Dataset):
         self.data_stamp = data_stamp
 
     def __getitem__(self, index):
-        # # 改成把s_begin往左移
-        # # s_begin = index
-        # s_begin = index - (self.pred_len + self.test_train_num - 1)
-        # s_end = index + self.seq_len
-        # r_begin = s_end - self.label_len
-        # r_end = r_begin + self.label_len + self.pred_len
-
         if not self.use_nearest_data and not self.use_further_data:
             s_begin = index
             # s_end = s_begin + self.seq_len
-            # 注意这里要做一些修改！！！
+            # modify s_end
             s_end = s_begin + (self.seq_len + self.pred_len + self.test_train_num - 1)
             
             r_begin = s_end - self.label_len
@@ -677,21 +667,20 @@ class Dataset_ETT_hour_Test(Dataset):
             s_begin = index
             s_end = s_begin + (self.seq_len + self.pred_len + self.test_train_num - 1)
             
-            # 这里先算r_end再算r_begin了
             r_end = s_end + self.adapt_start_pos
             r_begin = r_end - self.pred_len - self.label_len
 
-            seq_x = self.data_x[s_begin:s_end]  # (201, 7) ->（seq_len + pred_len + ttn - 1, channel）
-            seq_y = self.data_y[r_begin:r_end]  # (144, 7) -> (label_len + pred_len, channel)
+            seq_x = self.data_x[s_begin:s_end]  # (seq_len + pred_len + ttn - 1, channel)
+            seq_y = self.data_y[r_begin:r_end]  # (label_len + pred_len, channel)
             seq_x_mark = self.data_stamp[s_begin:s_end]
             seq_y_mark = self.data_stamp[r_begin:r_end]
 
             import copy
             seq_x = copy.deepcopy(seq_x)
             seq_x_mark = copy.deepcopy(seq_x_mark)
-            if self.adapt_start_pos < self.pred_len:  # 只有当start_pos小于pred_len时，才需要对后面补零
-                seq_x[-(self.pred_len-self.adapt_start_pos):, :] = 0  # 将seq_x最后面的(self.pred_len-self.adapt_start_pos)部分的值置为0
-                seq_x_mark[-(self.pred_len-self.adapt_start_pos):, :] = 0  # 同样也将seq_x_mark最后面的(self.pred_len-self.adapt_start_pos)部分的值置为0
+            if self.adapt_start_pos < self.pred_len:  # if start_pos < pred_len, padding zeros
+                seq_x[-(self.pred_len-self.adapt_start_pos):, :] = 0
+                seq_x_mark[-(self.pred_len-self.adapt_start_pos):, :] = 0
         else:  # self.use_further_data
             s_begin = index
             s_mid = s_begin + (self.seq_len + self.pred_len + self.test_train_num - 1)
@@ -700,8 +689,8 @@ class Dataset_ETT_hour_Test(Dataset):
             r_begin = s_end - self.label_len
             r_end = s_end + self.pred_len
 
-            seq_x = self.data_x[s_begin:s_end]  # (201, 7) ->（seq_len + pred_len + ttn - 1, channel）
-            seq_y = self.data_y[r_begin:r_end]  # (144, 7) -> (label_len + pred_len, channel)
+            seq_x = self.data_x[s_begin:s_end]  # (seq_len + pred_len + ttn - 1, channel)
+            seq_y = self.data_y[r_begin:r_end]  # (label_len + pred_len, channel)
             seq_x_mark = self.data_stamp[s_begin:s_end]
             seq_y_mark = self.data_stamp[r_begin:r_end]
 
@@ -722,8 +711,8 @@ class Dataset_ETT_minute_Test(Dataset):
     def __init__(self, root_path, flag='train', size=None,
                  features='S', data_path='ETTm1.csv',
                  target='OT', scale=True, timeenc=0, freq='t',
-                 use_nearest_data=False, use_further_data=False, adapt_start_pos = 1,  # 也别忘记use_nearest_data和adapt_start_pos参数
-                 test_train_num=1):  # 别忘记加上test_train_num参数！！
+                 use_nearest_data=False, use_further_data=False, adapt_start_pos = 1,
+                 test_train_num=1):  # add params: 'test_train_num', ''use_nearest_data' and 'adapt_start_pos'
         # size [seq_len, label_len, pred_len]
         # info
         if size == None:
@@ -748,9 +737,8 @@ class Dataset_ETT_minute_Test(Dataset):
         self.root_path = root_path
         self.data_path = data_path
 
-        # 注意：别忘记要加这一句话！！！
+        # add params
         self.test_train_num = test_train_num
-        # 以及这一句话，加上use_nearest_data参数！！！
         self.use_nearest_data = use_nearest_data
         self.use_further_data = use_further_data
         self.adapt_start_pos = adapt_start_pos
@@ -762,7 +750,7 @@ class Dataset_ETT_minute_Test(Dataset):
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
 
-        # 这里最好也做一次修改！！
+        # modify borders
         # border1s = [0, 12 * 30 * 24 * 4 - self.seq_len, 12 * 30 * 24 * 4 + 4 * 30 * 24 * 4 - self.seq_len]
         if not self.use_nearest_data and not self.use_further_data:
             border1s = [0, 12 * 30 * 24 * 4 - self.seq_len, 12 * 30 * 24 * 4 + 4 * 30 * 24 * 4 - (self.seq_len + self.pred_len + self.test_train_num - 1)]
@@ -807,7 +795,7 @@ class Dataset_ETT_minute_Test(Dataset):
         if not self.use_nearest_data and not self.use_further_data:
             s_begin = index
             # s_end = s_begin + self.seq_len
-            # 注意这里要做一些修改！！！
+            # modify s_end
             s_end = s_begin + (self.seq_len + self.pred_len + self.test_train_num - 1)
             
             r_begin = s_end - self.label_len
@@ -825,17 +813,17 @@ class Dataset_ETT_minute_Test(Dataset):
             r_end = s_end + self.adapt_start_pos
             r_begin = r_end - self.pred_len - self.label_len
 
-            seq_x = self.data_x[s_begin:s_end]  # (201, 7) ->（seq_len + pred_len + ttn - 1, channel）
-            seq_y = self.data_y[r_begin:r_end]  # (144, 7) -> (label_len + pred_len, channel)
+            seq_x = self.data_x[s_begin:s_end]  # (seq_len + pred_len + ttn - 1, channel)
+            seq_y = self.data_y[r_begin:r_end]  # (label_len + pred_len, channel)
             seq_x_mark = self.data_stamp[s_begin:s_end]
             seq_y_mark = self.data_stamp[r_begin:r_end]
 
             import copy
             seq_x = copy.deepcopy(seq_x)
             seq_x_mark = copy.deepcopy(seq_x_mark)
-            if self.adapt_start_pos < self.pred_len:  # 只有当start_pos小于pred_len时，才需要对后面补零
-                seq_x[-(self.pred_len-self.adapt_start_pos):, :] = 0  # 将seq_x最后面的(self.pred_len-self.adapt_start_pos)部分的值置为0
-                seq_x_mark[-(self.pred_len-self.adapt_start_pos):, :] = 0  # 同样也将seq_x_mark最后面的(self.pred_len-self.adapt_start_pos)部分的值置为0
+            if self.adapt_start_pos < self.pred_len:  # if start_pos < pred_len, padding zeros
+                seq_x[-(self.pred_len-self.adapt_start_pos):, :] = 0
+                seq_x_mark[-(self.pred_len-self.adapt_start_pos):, :] = 0
         else:  # self.use_further_data
             s_begin = index
             s_mid = s_begin + (self.seq_len + self.pred_len + self.test_train_num - 1)
@@ -844,8 +832,8 @@ class Dataset_ETT_minute_Test(Dataset):
             r_begin = s_end - self.label_len
             r_end = s_end + self.pred_len
 
-            seq_x = self.data_x[s_begin:s_end]  # (201, 7) ->（seq_len + pred_len + ttn - 1, channel）
-            seq_y = self.data_y[r_begin:r_end]  # (144, 7) -> (label_len + pred_len, channel)
+            seq_x = self.data_x[s_begin:s_end]  # (seq_len + pred_len + ttn - 1, channel)
+            seq_y = self.data_y[r_begin:r_end]  # (label_len + pred_len, channel)
             seq_x_mark = self.data_stamp[s_begin:s_end]
             seq_y_mark = self.data_stamp[r_begin:r_end]
 
