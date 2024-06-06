@@ -28,7 +28,7 @@ class Model(nn.Module):
         # x: [Batch, Input length, Channel]
         seq_last = x[:,-1:,:].detach()
 
-        x = x - seq_last  # 将输入数据的所有值都减去序列中的最后一个值
+        x = x - seq_last  # substract last value
         
         if self.individual:
             output = torch.zeros([x.size(0),self.pred_len,x.size(2)],dtype=x.dtype).to(x.device)
@@ -38,6 +38,6 @@ class Model(nn.Module):
         else:
             x = self.Linear(x.permute(0,2,1)).permute(0,2,1)
         
-        x = x + seq_last  # 完成之后再加回该值，最后再做预测
+        x = x + seq_last  # add back for final output
         
         return x  # [Batch, Output length, Channel]

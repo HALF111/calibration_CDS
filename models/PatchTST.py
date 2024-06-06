@@ -34,13 +34,13 @@ class Model(nn.Module):
         
         super().__init__()
         
-        # 注意，PatchTST参考TST的设计，其中默认使用的是BatchNorm
-        # 而不像In/Auto/FED-former等默认使用LayerNorm
+        # PatchTST uses BatchNorm for default, which refers to the design of TST
+        # Instead of LayerNorm like Informer/Autoformer/FEDformer, etc.
         
         # load parameters
         c_in = configs.enc_in
-        context_window = configs.seq_len  # 这里context_window就等于seq_len
-        target_window = configs.pred_len  # target_window就等于pred_len
+        context_window = configs.seq_len  # context_window = seq_len
+        target_window = configs.pred_len  # target_window = pred_len
         
         n_layers = configs.e_layers
         n_heads = configs.n_heads
@@ -97,7 +97,7 @@ class Model(nn.Module):
     
     
     def forward(self, x):           # x: [Batch, Input length, Channel]
-        # 这里默认是不做分解的
+        # do not compose for default
         if self.decomposition:
             res_init, trend_init = self.decomp_module(x)
             res_init, trend_init = res_init.permute(0,2,1), trend_init.permute(0,2,1)  # x: [Batch, Channel, Input length]

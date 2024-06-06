@@ -13,7 +13,7 @@ python -u run_longExp.py \
   --is_training 1 \
   --root_path ./dataset/ \
   --data_path electricity.csv \
-  --model_id Electricity_$seq_len'_'96 \
+  --model_id electricity_$seq_len'_'96 \
   --model $model_name \
   --data custom \
   --features M \
@@ -27,7 +27,7 @@ python -u run_longExp.py \
   --is_training 1 \
   --root_path ./dataset/ \
   --data_path electricity.csv \
-  --model_id Electricity_$seq_len'_'192 \
+  --model_id electricity_$seq_len'_'192 \
   --model $model_name \
   --data custom \
   --features M \
@@ -41,7 +41,7 @@ python -u run_longExp.py \
   --is_training 1 \
   --root_path ./dataset/ \
   --data_path electricity.csv \
-  --model_id Electricity_$seq_len'_'336 \
+  --model_id electricity_$seq_len'_'336 \
   --model $model_name \
   --data custom \
   --features M \
@@ -55,7 +55,7 @@ python -u run_longExp.py \
   --is_training 1 \
   --root_path ./dataset/ \
   --data_path electricity.csv \
-  --model_id Electricity_$seq_len'_'720 \
+  --model_id electricity_$seq_len'_'720 \
   --model $model_name \
   --data custom \
   --features M \

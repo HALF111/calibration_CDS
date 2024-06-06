@@ -8,7 +8,7 @@ fi
 seq_len=336
 model_name=PatchTST
 
-root_path_name=./dataset/ETT-small/
+root_path_name=./dataset/
 data_path_name=ETTh1.csv
 model_id_name=ETTh1
 data_name=ETTh1
@@ -16,11 +16,11 @@ data_name=ETTh1
 # for pred_len in 96 192 336 720
 for pred_len in 96
 do
-    python -u run.py \
+    python -u run_longExp.py \
       --is_training 1 \
       --root_path $root_path_name \
       --data_path $data_path_name \
-      --task_id $model_id_name'_'$seq_len'_'$pred_len \
+      --model_id $model_id_name'_'$seq_len'_'$pred_len \
       --model $model_name \
       --data $data_name \
       --features M \

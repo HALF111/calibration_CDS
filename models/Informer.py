@@ -18,7 +18,7 @@ class Model(nn.Module):
         self.pred_len = configs.pred_len
         self.output_attention = configs.output_attention
         
-        # 加上RevIN模块
+        # add RevIN if need
         self.add_revin = configs.add_revin
         if self.add_revin: 
             self.revin_layer = RevIN(configs.enc_in, affine=configs.affine, subtract_last=configs.subtract_last)
@@ -73,8 +73,8 @@ class Model(nn.Module):
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec,
                 enc_self_mask=None, dec_self_mask=None, dec_enc_mask=None, return_mid_embedding=False):
-        # 输入维度为[batch_size, seq_len, channel]
-        # 加上RevIN
+        # input dim: [batch_size, seq_len, channel]
+        # add RevIN if need
         if self.add_revin:
             x_enc = self.revin_layer(x_enc, 'norm')
 
@@ -82,21 +82,21 @@ class Model(nn.Module):
         enc_out, attns = self.encoder(enc_out, attn_mask=enc_self_mask)
 
         dec_out = self.dec_embedding(x_dec, x_mark_dec)
-        # 看是否需要mid_embedding
+        # check whether return mid_embedding
         if return_mid_embedding:
             dec_out, mid_embedding = self.decoder(dec_out, enc_out, x_mask=dec_self_mask, cross_mask=dec_enc_mask, return_mid_embedding=True)
         else:
             dec_out = self.decoder(dec_out, enc_out, x_mask=dec_self_mask, cross_mask=dec_enc_mask)
         
-        # RevIN做denorm回来
+        # RevIN denorm:
         if self.add_revin:
             dec_out = self.revin_layer(dec_out, 'denorm')
 
-        # 返回结果
+        # return results
         if self.output_attention:
             return dec_out[:, -self.pred_len:, :], attns
         elif return_mid_embedding:
-            # 同时返回mid_embedding和trend_part两个部分
+            # return both mid_embedding and trend_part, two parts
             if self.add_revin:
                 return dec_out[:, -self.pred_len:, :], mid_embedding[:, -self.pred_len:, :], self.revin_layer.mean, self.revin_layer.stdev
             else:

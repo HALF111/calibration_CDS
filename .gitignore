@@ -133,6 +133,9 @@ dmypy.json
 /dataset
 /results
 /test_results
+/mse_and_mae_results
+/error_results
+/residual_figures
 
 *.pth
 *.npy

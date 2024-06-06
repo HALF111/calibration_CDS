@@ -17,7 +17,8 @@ def main():
 
     # basic config
     parser.add_argument('--is_training', type=int, default=1, help='status')
-    parser.add_argument('--task_id', type=str, default='test', help='task id')
+    # parser.add_argument('--task_id', type=str, default='test', help='task id')
+    parser.add_argument('--model_id', type=str, default='test', help='model id')
     parser.add_argument('--model', type=str, default='FEDformer',
                         help='model name, options: [FEDformer, Autoformer, Informer, Transformer]')
 
@@ -123,6 +124,7 @@ def main():
     
     # PatchTST
     parser.add_argument('--pct_start', type=float, default=0.3, help='pct_start')
+    parser.add_argument('--random_seed', type=int, default=2021)
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
@@ -180,11 +182,6 @@ def main():
     
     parser.add_argument('--draw_adapt_figure', action='store_true')
 
-    # KNN
-    parser.add_argument('--run_knn', action='store_true')
-    parser.add_argument('--feature_dim', type=int, default=50)
-    parser.add_argument('--k_value', type=int, default=10)
-
     args = parser.parse_args()
 
     args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
@@ -207,7 +204,8 @@ def main():
 
             # setting record of experiments
             setting = '{}_{}_{}_modes{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_revin{}_{}_{}'.format(
-                args.task_id,
+                # args.task_id
+                args.model_id,
                 args.model,
                 args.mode_select,
                 args.modes,
@@ -340,10 +338,6 @@ def main():
             if args.get_data_error:
                 print('>>>>>>>get_data_error of train/val/test: {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
                 exp.get_data_error(setting=setting)
-            
-            if args.run_knn:
-                print('>>>>>>>run_knn for test{}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-                exp.run_KNN(setting=setting)
 
             # print('>>>>>>>my testing but with original model : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
             # exp.my_test(setting, is_training_part_params=True, use_adapted_model=False)
@@ -357,6 +351,7 @@ def main():
     else:
         ii = 0
         setting = '{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}'.format(args.model_id,
+                                                                                                      # args.task_id
                                                                                                       args.model,
                                                                                                       args.data,
                                                                                                       args.features,
