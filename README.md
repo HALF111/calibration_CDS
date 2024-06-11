@@ -16,7 +16,7 @@ We use PatchTST and ETTh1 datasets as an example.
 ## Citation
 ```bibtex
 @inproceedings{2024_calibration,
-  title={Calibration of Time-Series Forecasting Transformers: Detecting and Adapting Context-Driven Distribution Shift},
+  title={Calibration of Time-Series Forecasting: Detecting and Adapting Context-Driven Distribution Shift},
   author={Mouxiang Chen and Lefei Shen and Han Fu and Zhuo Li and Jianling Sun and Chenghao Liu}
   booktitle={Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining},
   year={2024}
