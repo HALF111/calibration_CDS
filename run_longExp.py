@@ -144,10 +144,10 @@ def main():
     parser.add_argument('--run_train', action='store_true')
     parser.add_argument('--run_test', action='store_true')
     parser.add_argument('--run_test_batchsize1', action='store_true')
-    parser.add_argument('--run_adapt', action='store_true')
-    parser.add_argument('--run_calc', action='store_true')
-    parser.add_argument('--run_get_grads', action='store_true')
-    parser.add_argument('--run_get_lookback_data', action='store_true')
+    # parser.add_argument('--run_adapt', action='store_true')
+    # parser.add_argument('--run_calc', action='store_true')
+    # parser.add_argument('--run_get_grads', action='store_true')
+    # parser.add_argument('--run_get_lookback_data', action='store_true')
     parser.add_argument('--run_select_with_distance', action='store_true')
     parser.add_argument('--run_select_caching', action='store_true')
     parser.add_argument('--selected_data_num', type=int, default=10)
@@ -156,23 +156,13 @@ def main():
     
     parser.add_argument('--lambda_period', type=float, default=0.1)
 
-    parser.add_argument('--get_grads_from', type=str, default="test", help="options:[test, val]")
-    parser.add_argument('--adapted_degree', type=str, default="small", help="options:[small, large]")
-
-    parser.add_argument('--lambda_reg', type=int, default=1)
-    parser.add_argument('--alpha', type=int, default=1)
-
     parser.add_argument('--use_nearest_data', action='store_true')
     parser.add_argument('--use_further_data', action='store_true')
     parser.add_argument('--adapt_start_pos', type=int, default=1)
 
-    parser.add_argument('--run_calc_acf', action='store_true')
-    parser.add_argument('--acf_lag', type=int, default=1)
-    parser.add_argument('--run_calc_kldiv', action='store_true')
     parser.add_argument('--get_data_error', action='store_true')
 
     parser.add_argument('--adapt_part_channels', action='store_true')
-    # parser.add_argument('--adapt_cycle', action='store_true')
     
     parser.add_argument('--remove_distance', action='store_true')
     parser.add_argument('--remove_cycle', action='store_true')
@@ -181,6 +171,8 @@ def main():
     parser.add_argument('--adapt_whole_model', action='store_true')
     
     parser.add_argument('--draw_adapt_figure', action='store_true')
+    
+    parser.add_argument('--show_loss_details', action='store_true')
 
     args = parser.parse_args()
 
@@ -241,46 +233,9 @@ def main():
                 print('>>>>>>>normal testing but batch_size is 1 : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
                 # exp.test(setting, flag="test_with_batchsize_1")
                 exp.test(setting, test=1, flag="test_with_batchsize_1")
-
-            if args.run_adapt:
-                print('>>>>>>>my testing with test-time training : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-                # exp.my_test(setting, is_training_part_params=True, use_adapted_model=True, test_train_epochs=1)
-                exp.my_test(setting, test=1, is_training_part_params=True, use_adapted_model=True, test_train_epochs=args.test_train_epochs)
-
-                # exp.my_test_mp(setting, is_training_part_params=True, use_adapted_model=True, test_train_epochs=1)
-
-            if args.run_calc:
-                print('>>>>>>>run_calc test with test-time training : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-                # obtain gradients
-                weight_path = "./grads_npy/" + setting
-                if args.get_grads_from == "test":
-                    weight_file = f"{weight_path}/weights_{args.get_grads_from}_{args.adapted_degree}_ttn{args.test_train_num}.txt"
-                elif args.get_grads_from == "val":
-                    weight_file = f"{weight_path}/weights_{args.get_grads_from}_{args.adapted_degree}_ttn{args.test_train_num}.txt"
-
-                if os.path.exists(weight_file):
-                    with open(weight_file) as f:
-                        weights_str = f.readline()
-                        weights_str_list = weights_str.split(',')
-                        weights = [float(weight) for weight in weights_str_list]
-                    print(weights)
-                else:
-                    weights = None
-
-                mse, mae = exp.calc_test(setting, test=1, is_training_part_params=True, use_adapted_model=True, test_train_epochs=args.test_train_epochs, weights_given=weights)
-
-                result_dir = "./mse_and_mae_results"
-                dataset_name = args.data_path.replace(".csv", "")
-                file_name = f"{dataset_name}_pl{args.pred_len}_alpha{int(args.alpha)}_ttn{args.test_train_num}_lambda{int(args.lambda_reg)}.txt"
-
-                if not os.path.exists(result_dir):
-                    os.makedirs(result_dir)
-                file_path = os.path.join(result_dir, file_name)
-                with open(file_path, "w") as f:
-                    f.write(f"{mse}, {mae}")
             
             if args.run_select_with_distance:
-                print('>>>>>>>my testing with test-time training : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
+                print('>>>>>>> run_select_with_distance : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
                 mse, mae = exp.select_with_distance(setting, test=1, is_training_part_params=True, use_adapted_model=True, test_train_epochs=args.test_train_epochs)
                 
                 result_dir = "./mse_and_mae_results"
@@ -297,7 +252,7 @@ def main():
                     f.write(f"{mse}, {mae}")
 
             if args.run_select_caching:
-                print('>>>>>>>my testing with test-time training with caching : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
+                print('>>>>>>> run_select_caching : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
                 mse, mae = exp.select_with_distance_caching(setting, test=1, is_training_part_params=True, use_adapted_model=True, test_train_epochs=args.test_train_epochs)
                 
                 result_dir = "./mse_and_mae_results"
@@ -314,34 +269,12 @@ def main():
                     f.write(f"{mse}, {mae}")
 
             if args.adapt_whole_model:
+                print('>>>>>>> adapt_whole_model : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
                 mse, mae = exp.adapt_whole_model(setting, test=1, is_training_part_params=False, use_adapted_model=True, test_train_epochs=args.test_train_epochs)
-            
-            if args.run_get_grads:
-                print('>>>>>>>get grads : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-                if args.get_grads_from == "test":
-                    exp.get_grads(setting, test=1, is_training_part_params=True, use_adapted_model=True, test_train_epochs=args.test_train_epochs, flag="test", adapted_degree=args.adapted_degree)
-                elif args.get_grads_from == "val":
-                    exp.get_grads(setting, test=1, is_training_part_params=True, use_adapted_model=True, test_train_epochs=args.test_train_epochs, flag="val", adapted_degree=args.adapted_degree)
-
-            if args.run_get_lookback_data:
-                print('>>>>>>>get look-back data : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-                exp.get_lookback_data(setting)
-
-            if args.run_calc_acf:
-                print('>>>>>>>calc ACF with lag={} : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(args.acf_lag, setting))
-                exp.calc_acf(setting, lag=args.acf_lag)
-            
-            if args.run_calc_kldiv:
-                print('>>>>>>>calc KLdiv between train/val/test{} : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(args.acf_lag, setting))
-                exp.calc_KLdiv(setting)
             
             if args.get_data_error:
                 print('>>>>>>>get_data_error of train/val/test: {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
                 exp.get_data_error(setting=setting)
-
-            # print('>>>>>>>my testing but with original model : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-            # exp.my_test(setting, is_training_part_params=True, use_adapted_model=False)
-
 
             if args.do_predict:
                 print('>>>>>>>predicting : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))

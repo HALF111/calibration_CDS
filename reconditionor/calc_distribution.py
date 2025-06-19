@@ -27,7 +27,7 @@ for name in ["national_illness"]:
         # PART 1: get residuals
         residuals_file_name = dir_path + f"residuals_pl{pred_len}_{flag}.npy"
         residuals = np.load(residuals_file_name)
-        print(residuals.shape)
+        print("residuals.shape:", residuals.shape)
         
         if "ETTh" in name or "traffic" in name or "electricity" in name:
             period = 24
@@ -38,32 +38,34 @@ for name in ["national_illness"]:
         elif "national_illness" in name:
             period = 52
         
+        # 2. split residuals by its periodicity
         data_len = residuals.shape[0] // period * period
         residuals_copy = residuals[:data_len]
         residuals_copy_reshape = residuals_copy.reshape(data_len//period, period, residuals.shape[1], residuals.shape[2])
-        print(residuals_copy_reshape.shape)
+        print("residuals_copy_reshape.shape:", residuals_copy_reshape.shape)
         # assert (residuals_copy_reshape[1, 0] == residuals[1*period+0]).all()
         # assert (residuals_copy_reshape[2, 4] == residuals[2*period+4]).all()
         
         residuals_period_list = np.split(residuals_copy_reshape, period, axis=1)
-        print(len(residuals_period_list))
+        print("len(residuals_period_list):", len(residuals_period_list))
         for i in range(len(residuals_period_list)):
             residuals_period_list[i] = residuals_period_list[i].squeeze(axis=1)
-        print(residuals_period_list[0].shape)
+        print("residuals_period_list[0].shape:", residuals_period_list[0].shape)
         # assert (residuals_period_list[0][1] == residuals[1*period+0]).all()
         # assert (residuals_period_list[4][2] == residuals[2*period+4]).all()
         
         
+        # 3. flatten & split bins within max and min values
         residuals = residuals.flatten()
         
-        print(max(residuals), min(residuals))
-        print(residuals.mean(), residuals.var())
-        print(residuals.shape)
+        print("max & min of residuals:", max(residuals), min(residuals))
+        print("mean & var of residuals:", residuals.mean(), residuals.var())
+        print("residuals.shape:", residuals.shape)
         
         for i in range(len(residuals_period_list)):
             residuals_period_list[i] = residuals_period_list[i].flatten()
-            print(residuals_period_list[i].mean(), residuals_period_list[i].var())
-        print(residuals_period_list[0].shape)
+            print("mean & var of residuals_period_list", residuals_period_list[i].mean(), residuals_period_list[i].var())
+        print("residuals_period_list[0].shape:", residuals_period_list[0].shape)
         
         
         # firstly split by bins

@@ -38,6 +38,9 @@ do
       --batch_size 16 \
       --learning_rate 0.0025 \
       --run_test \
-      --test_train_num 200 --run_select_with_distance --selected_data_num 3 --adapted_lr_times 2
+      --gpu 3 \
+      --run_select_with_distance \
+      --test_train_num 200 --selected_data_num 3 --adapted_lr_times 2 \
+    #   --show_loss_details --draw_adapt_figure
     #   >logs/LongForecasting/$model_name'_'$model_id_name'_'$seq_len'_'$pred_len.log 
 done

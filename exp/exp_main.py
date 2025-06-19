@@ -39,8 +39,11 @@ class Exp_Main(Exp_Basic):
         self.test_train_num = self.args.test_train_num
 
         data_path = self.args.data_path
+        
+        # 1. get channels with intense periodicity
         # adapt_part_channel is an optional choice
         # if set, we only fine-tune part of channels in the dataset, instead of all channels
+        # [1,3, 2,4,5,6] means channel 1&3 have intense periodicity, and channel 2&4&5&6 have relatively weak periodicity, and channel 7 almost has no periodicity.qwe
         if "ETTh1" in data_path: selected_channels = [1,3, 2,4,5,6]
         elif "ETTh2" in data_path: selected_channels = [7, 1,3]
         elif "ETTm1" in data_path: selected_channels = [1,3, 2,4,5]
@@ -54,7 +57,7 @@ class Exp_Main(Exp_Basic):
         
         self.selected_channels = selected_channels
         
-        
+        # 2. acquire the periodicity in advance, via calculate FFT !!!
         if "ETTh1" in data_path: period = 24
         elif "ETTh2" in data_path: period = 24
         elif "ETTm1" in data_path: period = 96
@@ -67,6 +70,17 @@ class Exp_Main(Exp_Basic):
         elif "WTH_informer" in data_path: period = 24
         else: period = 1
         self.period = period
+        
+        # 3. set linear layer names mapping in advance
+        #! Need personalization!
+        self.linear_map = {
+            "ETSformer": ["decoder.pred"],
+            # There are e_layers+1 of layers in decoder in original Crossformer, so the last layer is self.args.e_layers
+            "Crossformer": [f"decoder.decode_layers.{self.args.e_layers}.linear_pred"],
+            "Linear": ["Linear"],
+            "PatchTST": ["model.head.linear"],
+            "default": ["decoder.projection"],
+        }
 
 
     def _build_model(self):
@@ -313,6 +327,7 @@ class Exp_Main(Exp_Basic):
         test_data, test_loader = self._get_data(flag=flag)
         if test:
             print('loading model from checkpoint !!!')
+            # self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
             self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
 
         preds = []
@@ -436,6 +451,7 @@ class Exp_Main(Exp_Basic):
 
     def get_data_error(self, setting, test=0):
         print('loading model from checkpoint !!!')
+        # self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
         self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
         
         assert self.args.batch_size == 1
@@ -530,6 +546,7 @@ class Exp_Main(Exp_Basic):
         data_len = len(test_data)
         if test:
             print('loading model from checkpoint !!!')
+            # self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
             self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
 
         self.model.eval()
@@ -537,12 +554,19 @@ class Exp_Main(Exp_Basic):
         preds = []
         trues = []
 
-        RECORD_LOSS = True
+        SHOW_LOSS_DETAILS = self.args.show_loss_details
         
         a1, a2, a3, a4 = [], [], [], []
-        # 4 arrays correspond to: loss_before_adapt, loss_selected_samples, loss_selected_sample_adapted, loss_after_adapt
-        all_angels = []
+        # 4 arrays correspond to: loss_before_adapt, loss_selected_samples, loss_selected_samples_adapted, loss_after_adapt
+        all_angles = []
         all_distances = []
+        
+        # extract some hyper-params
+        seq_len = self.args.seq_len
+        label_len = self.args.label_len
+        pred_len = self.args.pred_len
+        adapt_start_pos = self.args.adapt_start_pos
+
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -556,12 +580,17 @@ class Exp_Main(Exp_Basic):
         #     os.makedirs(folder_path)
 
         # load model params
+        # self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
         self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
 
         if weights_given:
             print(f"The given weights is {weights_given}")
             print(f"The length of given weights is {len(weights_given)}")
-        
+            
+        printed_selected_channels = [item+1 for item in self.selected_channels]
+        print(f"adapt_part_channels?: {self.args.adapt_part_channels}")
+        print(f"remove_distance?: {self.args.remove_distance}, remove_cycle?: {self.args.remove_cycle}, remove_nearest: {self.args.remove_nearest}")
+        print(f"first 25 selected_channels are: {printed_selected_channels[:25]}")
 
         for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
             # manually drop last batch
@@ -571,52 +600,28 @@ class Exp_Main(Exp_Basic):
             cur_model = copy.deepcopy(self.model)
             # cur_model.train()
             cur_model.eval()
-
+            
+            # get params of prediction layer
+            # The reason for not placing this part out of iteration is that: we need to extract params from cur_model, 
+            # which will be re-assigned/copied from self.model at each iteration!!!
             if is_training_part_params:
                 params = []
                 names = []
-                params_norm = []
-                names_norm = []
                 cur_model.requires_grad_(False)
                 
-                # Need personalization!
-                linear_map = {
-                    "ETSformer": ["decoder.pred"],
-                    "Crossformer": [f"decoder.decode_layers.{self.args.e_layers}.linear_pred"],
-                    "Linear": ["Linear"],
-                    "PatchTST": ["model.head.linear"],
-                    "default": ["decoder.projection"],
-                }
-                
-                if self.args.model in linear_map:
-                    linear_name_list = linear_map[self.args.model]
+                if self.args.model in self.linear_map:
+                    linear_name_list = self.linear_map[self.args.model]
                 else:
-                    linear_name_list = linear_map["default"]
-                    
+                    linear_name_list = self.linear_map["default"]
                 
-                # # TODO:这里改成map形式，用if-else-if太冗余了！！！
-                # if self.args.model == 'ETSformer':
-                #     linear_layer_name = "decoder.pred"
-                # elif self.args.model == 'Crossformer':
-                #     # There are e_layers+1 of layers in decoder in original Crossformer, so the last layer is self.args.e_layers
-                #     linear_layer_name = f"decoder.decode_layers.{self.args.e_layers}.linear_pred"
-                # elif "Linear" in self.args.model:
-                #     linear_layer_name = "Linear"
-                # elif "PatchTST" in self.args.model:
-                #     linear_layer_name = "model.head.linear"
-                # else:
-                #     linear_layer_name = "decoder.projection"
-                
-                # change string to list
+                # change string to list if need
                 if isinstance(linear_name_list, str):
                     linear_name_list = [linear_name_list]
-                
-                # print(linear_name_list)
-                # print(cur_model)
                 
                 # traverse and get params:
                 for n_m, m in cur_model.named_modules():
                     for linear_name in linear_name_list:
+                        # if n_m includes linear_name
                         if linear_name in n_m:
                             m.requires_grad_(True)
                             for n_p, p in m.named_parameters():
@@ -624,64 +629,65 @@ class Exp_Main(Exp_Basic):
                                     params.append(p)
                                     names.append(f"{n_m}.{n_p}")
 
-                # set lr:
+                # set lr & change Adam to SGD optimizer:
                 lr = self.args.learning_rate * self.args.adapted_lr_times
-                # changing Adam to SGD optimizer:
                 model_optim = optim.SGD(params, lr=lr)  # model_optim = optim.Adam(params, lr=lr)
             else:
                 cur_model.requires_grad_(True)
-                # set lr:
+                # set lr & change Adam to SGD optimizer:
                 lr = self.args.learning_rate * self.args.adapted_lr_times
-                # changing Adam to SGD optimizer:
                 model_optim = optim.SGD(cur_model.parameters(), lr=lr)  # model_optim = optim.Adam(cur_model.parameters(), lr=lr)
             
-            # 1. loss before adaptation:
-            # cur_model.eval()
-            seq_len = self.args.seq_len
-            pred_len = self.args.pred_len
-            adapt_start_pos = self.args.adapt_start_pos
-            if not self.args.use_nearest_data or self.args.use_further_data:
-                pred, true = self._process_one_batch_with_model(cur_model, test_data,
-                    batch_x[:, -seq_len:, :], batch_y, 
-                    batch_x_mark[:, -seq_len:, :], batch_y_mark)
-            else:
-                pred, true = self._process_one_batch_with_model(cur_model, test_data,
-                    batch_x[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y, 
-                    batch_x_mark[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y_mark)
-            if self.args.adapt_part_channels:
-                pred = pred[:, :, self.selected_channels]
-                true = true[:, :, self.selected_channels]
-            loss_before_adapt = criterion(pred, true)
-            a1.append(loss_before_adapt.item())
-            # cur_model.train()
             
-            # 2. get gradient with ground-truth
-            if use_adapted_model:
-                seq_len = self.args.seq_len
-                pred_len = self.args.pred_len
-                adapt_start_pos = self.args.adapt_start_pos
+            # a1: record loss before adaptation:
+            if SHOW_LOSS_DETAILS:
+                # cur_model.eval()
                 if not self.args.use_nearest_data or self.args.use_further_data:
-                    pred_answer, true_answer = self._process_one_batch_with_model(cur_model, test_data,
+                    pred, true = self._process_one_batch_with_model(cur_model, test_data,
                         batch_x[:, -seq_len:, :], batch_y, 
                         batch_x_mark[:, -seq_len:, :], batch_y_mark)
                 else:
-                    pred_answer, true_answer = self._process_one_batch_with_model(cur_model, test_data,
+                    pred, true = self._process_one_batch_with_model(cur_model, test_data,
                         batch_x[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y, 
                         batch_x_mark[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y_mark)
+                if self.args.adapt_part_channels:
+                    pred = pred[:, :, self.selected_channels]
+                    true = true[:, :, self.selected_channels]
+                loss_before_adapt = criterion(pred, true)
+                a1.append(loss_before_adapt.item())
+                # cur_model.train()
             
-            if self.args.adapt_part_channels:
-                pred_answer = pred_answer[:, :, self.selected_channels]
-                true_answer = true_answer[:, :, self.selected_channels]
-            loss_ans_before = criterion(pred_answer, true_answer)
-            loss_ans_before.backward()
+            if self.args.draw_adapt_figure:
+                # store 'pred' and 'true' before adaptation
+                pred_before_adapt = pred.detach().cpu().clone().numpy()
+                true_before_adapt = true.detach().cpu().clone().numpy()
+            
+            
+            # get gradient of ground-truth as standard answer for the direction of fine-tuning
+            if SHOW_LOSS_DETAILS:
+                if use_adapted_model:
+                    if not self.args.use_nearest_data or self.args.use_further_data:
+                        pred_answer, true_answer = self._process_one_batch_with_model(cur_model, test_data,
+                            batch_x[:, -seq_len:, :], batch_y, 
+                            batch_x_mark[:, -seq_len:, :], batch_y_mark)
+                    else:
+                        pred_answer, true_answer = self._process_one_batch_with_model(cur_model, test_data,
+                            batch_x[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y, 
+                            batch_x_mark[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y_mark)
+                
+                if self.args.adapt_part_channels:
+                    pred_answer = pred_answer[:, :, self.selected_channels]
+                    true_answer = true_answer[:, :, self.selected_channels]
+                loss_ans_before = criterion(pred_answer, true_answer)
+                loss_ans_before.backward()
 
-            w_T = params[0].grad.T
-            b = params[1].grad.unsqueeze(0)
-            params_answer = torch.cat((w_T, b), 0)
-            # get gradient with ground-truth, including W and b.
-            params_answer = params_answer.ravel()
+                w_T = params[0].grad.T
+                b = params[1].grad.unsqueeze(0)
+                params_answer = torch.cat((w_T, b), 0)
+                # get gradient with ground-truth, including W and b.
+                params_answer = params_answer.ravel()
 
-            model_optim.zero_grad()  # clear gradient
+                model_optim.zero_grad()  # clear gradient
 
 
             # channels without significant periodicity
@@ -705,7 +711,7 @@ class Exp_Main(Exp_Basic):
                         lookback_x = batch_x[:, ii : ii+seq_len, :].reshape(-1)
                     dist = F.pairwise_distance(test_x, lookback_x, p=2).item()
                     distance_pairs.append([ii, dist])
-                # randomly select samples with the number of 'selected_data_num'
+                # randomly select 'selected_data_num' samples.
                 import random
                 selected_distance_pairs = random.sample(distance_pairs, self.args.selected_data_num)
             else:
@@ -748,23 +754,15 @@ class Exp_Main(Exp_Basic):
             selected_distances = [item[1] for item in selected_distance_pairs]
             all_distances.append(selected_distances)
 
+
             cur_grad_list = []
-
             for epoch in range(test_train_epochs):
-
                 gradients = []
-                accpted_samples_num = set()
-
-                # num_of_loss_per_update = 1
                 mean_loss = 0
 
                 for ii in selected_indices:
 
                     model_optim.zero_grad()
-
-                    seq_len = self.args.seq_len
-                    label_len = self.args.label_len
-                    pred_len = self.args.pred_len
 
                     pred, true = self._process_one_batch_with_model(cur_model, test_data,
                         batch_x[:, ii : ii+seq_len, :], batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :], 
@@ -825,11 +823,12 @@ class Exp_Main(Exp_Basic):
 
 
             # calculate the angle between the gradients of ground-truth and the weighted sum of current gradients
-            import math
-            product = torch.dot(weighted_params, params_answer)
-            product = product / (torch.norm(weighted_params) * torch.norm(params_answer))
-            angel = math.degrees(math.acos(product))
-            all_angels.append(angel)
+            if SHOW_LOSS_DETAILS:
+                import math
+                product = torch.dot(weighted_params, params_answer)
+                product = product / (torch.norm(weighted_params) * torch.norm(params_answer))
+                angle = math.degrees(math.acos(product))
+                all_angles.append(angle)
             
 
             # change 'weighted_params' back to 'w_grad' and 'b_grad'
@@ -843,64 +842,44 @@ class Exp_Main(Exp_Basic):
             from torch.nn.parameter import Parameter
             cur_lr = self.args.learning_rate * self.args.adapted_lr_times
 
-            # make gradients on unselected channels as 0
+            # make gradients on unselected channels as 0 if need
             if self.args.adapt_part_channels:
                 w_grad[unselected_channels, :] = 0
                 b_grad[unselected_channels] = 0
 
-            # Note: params should minus gradient, instead of adding gradients!
+            # Note: params should substratc gradient, instead of adding gradients!
+            # We re-use the linear_name_list defined before:
             for linear_name in linear_name_list:
                 cur_linear = f"cur_model.{linear_name}" if self.args.model != "Crossformer" else f"cur_model.decoder.decode_layers[{self.args.e_layers}].linear_pred"
                 # manually GD on weight and bias of prediction layer
                 exec(f"{cur_linear}.weight = Parameter({cur_linear}.weight - w_grad * cur_lr)")
                 exec(f"{cur_linear}.bias = Parameter({cur_linear}.bias - b_grad * cur_lr)")
-                            
-            # if self.args.model == 'ETSformer':
-            #     cur_model.decoder.pred.weight = Parameter(cur_model.decoder.pred.weight - w_grad * cur_lr)
-            #     cur_model.decoder.pred.bias = Parameter(cur_model.decoder.pred.bias - b_grad * cur_lr)
-            # elif self.args.model == 'Crossformer':
-            #     # There are e_layers+1 of layers in decoder in original Crossformer, so the last layer is self.args.e_layers
-            #     adapt_layer = cur_model.decoder.decode_layers[self.args.e_layers].linear_pred
-            #     adapt_layer.weight = Parameter(adapt_layer.weight - w_grad * cur_lr)
-            #     adapt_layer.bias = Parameter(adapt_layer.bias - b_grad * cur_lr)
-            # elif "Linear" in self.args.model:
-            #     cur_model.Linear.weight = Parameter(cur_model.Linear.weight - w_grad * cur_lr)
-            #     cur_model.Linear.bias = Parameter(cur_model.Linear.bias - b_grad * cur_lr)
-            # elif "PatchTST" in self.args.model:
-            #     cur_model.model.head.linear.weight = Parameter(cur_model.model.head.linear.weight - w_grad * cur_lr)
-            #     cur_model.model.head.linear.bias = Parameter(cur_model.model.head.linear.bias - b_grad * cur_lr)
-            # else:
-            #     cur_model.decoder.projection.weight = Parameter(cur_model.decoder.projection.weight - w_grad * cur_lr)
-            #     cur_model.decoder.projection.bias = Parameter(cur_model.decoder.projection.bias - b_grad * cur_lr)
+            
 
             # calculate mean loss
             mean_loss = mean_loss / self.args.selected_data_num
-            a2.append(mean_loss.item())
+            # a2: record loss on selected samples before model adaptation.
+            if SHOW_LOSS_DETAILS:
+                a2.append(mean_loss.item())
+
+            # a3: record loss on selected sample after model adaptation
+            if SHOW_LOSS_DETAILS:
+                tmp_loss = 0
+                for ii in selected_indices:
+                    pred, true = self._process_one_batch_with_model(cur_model, test_data,
+                        batch_x[:, ii : ii+seq_len, :], batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :], 
+                        batch_x_mark[:, ii : ii+seq_len, :], batch_x_mark[:, ii+seq_len-label_len : ii+seq_len+pred_len, :])
+                    if self.args.adapt_part_channels:
+                        pred = pred[:, :, self.selected_channels]
+                        true = true[:, :, self.selected_channels]
+                    tmp_loss += criterion(pred, true)
+                tmp_loss = tmp_loss / self.args.selected_data_num
+                a3.append(tmp_loss.item())
 
 
-            seq_len = self.args.seq_len
-            label_len = self.args.label_len
-            pred_len = self.args.pred_len
-            tmp_loss = 0
-            for ii in selected_indices:
-                pred, true = self._process_one_batch_with_model(cur_model, test_data,
-                    batch_x[:, ii : ii+seq_len, :], batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :], 
-                    batch_x_mark[:, ii : ii+seq_len, :], batch_x_mark[:, ii+seq_len-label_len : ii+seq_len+pred_len, :])
-                if self.args.adapt_part_channels:
-                    pred = pred[:, :, self.selected_channels]
-                    true = true[:, :, self.selected_channels]
-                tmp_loss += criterion(pred, true)
-            tmp_loss = tmp_loss / self.args.selected_data_num
-            a3.append(tmp_loss.item())
-            a3.append(0)
-
-
-            # record loss after adaptation
+            # a4: record loss after adaptation
             cur_model.eval()
             
-            seq_len = self.args.seq_len
-            pred_len = self.args.pred_len
-            adapt_start_pos = self.args.adapt_start_pos
             if use_adapted_model:
                 if not self.args.use_nearest_data or self.args.use_further_data:
                     pred, true = self._process_one_batch_with_model(cur_model, test_data,
@@ -915,14 +894,16 @@ class Exp_Main(Exp_Basic):
             if self.args.adapt_part_channels:
                 pred = pred[:, :, self.selected_channels]
                 true = true[:, :, self.selected_channels]
-                
-            # store pred/true after adaptation
-            pred_after_adapt = pred.detach().cpu().clone().numpy()
-            true_after_adapt = true.detach().cpu().clone().numpy()
-
-            # loss after adaptation
-            loss_after_adapt = criterion(pred, true)
-            a4.append(loss_after_adapt.item())
+            
+            # a4: get loss after adaptation
+            if SHOW_LOSS_DETAILS:
+                loss_after_adapt = criterion(pred, true)
+                a4.append(loss_after_adapt.item())
+            
+            if self.args.draw_adapt_figure:
+                # store pred/true after adaptation
+                pred_after_adapt = pred.detach().cpu().clone().numpy()
+                true_after_adapt = true.detach().cpu().clone().numpy()
 
             preds.append(pred.detach().cpu().numpy())
             trues.append(true.detach().cpu().numpy())
@@ -930,27 +911,57 @@ class Exp_Main(Exp_Basic):
 
             if (i+1) % 100 == 0 or (data_len - i) <= 100 and (i+1) % 10 == 0:
                 print("\titers: {0}, cost time: {1}s".format(i + 1, time.time() - test_time_start))
-                print(gradients)
+                # print(gradients)
                 tmp_p = np.array(preds); tmp_p = tmp_p.reshape(-1, tmp_p.shape[-2], tmp_p.shape[-1])
                 tmp_t = np.array(trues); tmp_t = tmp_t.reshape(-1, tmp_t.shape[-2], tmp_t.shape[-1])
                 tmp_mae, tmp_mse, _, _, _ = metric(tmp_p, tmp_t)
                 print('mse:{}, mae:{}'.format(tmp_mse, tmp_mae))
                 
-                avg_1, avg_2, avg_3, avg_4 = 0, 0, 0, 0
-                avg_angel = 0
-                num = len(a1)
-                for iii in range(num):
-                    avg_1 += a1[iii]; avg_2 += a2[iii]; avg_3 += a3[iii]; avg_4 += a4[iii]; avg_angel += all_angels[iii]
-                avg_1 /= num; avg_2 /= num; avg_3 /= num; avg_4 /= num; avg_angel /= num
-                print("1.before_adapt, 2.adapt_sample, 3.adapt_sample_after, 4.after_adapt, 5.angel_between_answer")
-                print("average:", avg_1, avg_2, avg_3, avg_4, avg_angel)
-                print("last one:", a1[-1], a2[-1], a3[-1], a4[-1], all_angels[-1])
-
-                printed_selected_channels = [item+1 for item in self.selected_channels]
-                print(f"adapt_part_channels: {self.args.adapt_part_channels}")
-                print(f"remove_distance: {self.args.remove_distance}, remove_cycle: {self.args.remove_cycle}, remove_nearest: {self.args.remove_nearest}")
-                print(f"first 25th selected_channels: {printed_selected_channels[:25]}")
-                print(f"selected_distance_pairs are: {selected_distance_pairs}")
+                # show detais of loss during adaptation:
+                if SHOW_LOSS_DETAILS:
+                    avg_1, avg_2, avg_3, avg_4 = sum(a1)/len(a1), sum(a2)/len(a2), sum(a3)/len(a3), sum(a4)/len(a4)
+                    avg_angle = sum(all_angles) / len(all_angles)
+                    print("1.before_adapt, 2.adapt_sample, 3.adapt_sample_after, 4.after_adapt, 5.angle_between_answer")
+                    print("average:", avg_1, avg_2, avg_3, avg_4, avg_angle)
+                    print("last one:", a1[-1], a2[-1], a3[-1], a4[-1], all_angles[-1])
+                    print(f"selected_distance_pairs are: {selected_distance_pairs}")
+            
+            
+            # Draw figures for prediction results after adaptation, if set 'draw_adapt_figure' as True:
+            interval = 20 if 'illness' in self.args.data_path else 50
+            if i % interval == 0:
+                # if need draw figures for prediction after adaptation
+                if self.args.draw_adapt_figure:
+                    folder_path = './test_results/' + setting + '/'
+                    if not os.path.exists(folder_path):
+                        os.makedirs(folder_path)
+            
+                    # Since actual length of batch_x is 'ttn+pred_len+seq_len', so we need to extract the last [:, -seq_len:, :] part!
+                    # And since illness is far too short, we will preserve more data for visualization
+                    if not 'illness' in self.args.data_path:
+                        input = batch_x[:, -self.args.seq_len:, :]
+                    else:
+                        input = batch_x[:, -3*self.args.seq_len:, :]
+                        # input = batch_x[:, :, :]
+                    input = input.detach().cpu().numpy()
+                    # print(batch_x.shape, input.shape, self.args.seq_len)
+                    assert (true_before_adapt == true_after_adapt).all()
+                    
+                    gt = np.concatenate((input[0, :, -1], true_before_adapt[0, :, -1]), axis=0)
+                    pd_before_adapt = np.concatenate((input[0, :, -1], pred_before_adapt[0, :, -1]), axis=0)
+                    pd_after_adapt = np.concatenate((input[0, :, -1], pred_after_adapt[0, :, -1]), axis=0)
+                    
+                    name = os.path.join(folder_path, str(i) + '.pdf')
+                    plt.figure()
+                    # give a bigger zorder to ground-truth, to make it at the top
+                    plt.plot(gt, label='GroundTruth', linewidth=2, zorder=3)
+                    if pd_before_adapt is not None:
+                        plt.plot(pd_before_adapt, label='Before adaptation', linewidth=2, zorder=1)
+                    if pd_after_adapt is not None:
+                        plt.plot(pd_after_adapt, label='After adaptation', linewidth=2, zorder=2)
+                    plt.legend()
+                    plt.savefig(name, bbox_inches='tight')
+            
 
             cur_model.eval()
             # cur_model.cpu()
@@ -995,62 +1006,32 @@ class Exp_Main(Exp_Basic):
         # Note: we have to read all data once!!
         tmp_all_data, tmp_all_loader = self._get_data(flag='all')
         
-        test_data, test_loader = self._get_data_at_test_time(flag='test')
         # test_data, test_loader = self._get_data(flag='test')
+        test_data, test_loader = self._get_data_at_test_time(flag='test')
         data_len = len(test_data)
+        
         if test:
             print('loading model from checkpoint !!!')
+            # self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
             self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
         
         self.model.eval()
-        
-        seq_len = self.args.seq_len
-        pred_len = self.args.pred_len
-        
-        
-        # batch_x_lst_1 = []
-        # mid_embeddings_1 = []
-        # seq_len = self.args.seq_len
-        # for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(tmp_test_loader):
-        #     pred, true, mid_embedding = self._process_one_batch_with_model(self.model, test_data,
-        #             batch_x[:, -seq_len:, :], batch_y, 
-        #             batch_x_mark[:, -seq_len:, :], batch_y_mark, return_mid_embedding=True)
-        #     batch_x_lst_1.append(batch_x)
-        #     mid_embeddings_1.append(mid_embedding)
-        # batch_x_lst_2 = []
-        # mid_embeddings_2 = []
-        # for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
-        #     pred, true, mid_embedding = self._process_one_batch_with_model(self.model, test_data,
-        #             batch_x[:, -seq_len:, :], batch_y, 
-        #             batch_x_mark[:, -seq_len:, :], batch_y_mark, return_mid_embedding=True)
-        #     batch_x_lst_2.append(batch_x)
-        #     mid_embeddings_2.append(mid_embedding)
-            
-            
-        # batch_x_lst_1 = []
-        # mid_embeddings_1 = []
-        # seq_len = self.args.seq_len
-        # for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(tmp_test_loader):
-        #     pred, true, mid_embedding = self._process_one_batch_with_model(self.model, test_data,
-        #             batch_x[:, -seq_len:, :], batch_y, 
-        #             batch_x_mark[:, -seq_len:, :], batch_y_mark, return_mid_embedding=True)
-        #     batch_x_lst_1.append(batch_x)
-        #     mid_embeddings_1.append(mid_embedding)
-        # batch_x_lst_2 = []
-        # mid_embeddings_2 = []
-        # for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
-        #     pred, true, mid_embedding = self._process_one_batch_with_model(self.model, test_data,
-        #             batch_x[:, -seq_len:, :], batch_y, 
-        #             batch_x_mark[:, -seq_len:, :], batch_y_mark, return_mid_embedding=True)
-        #     batch_x_lst_2.append(batch_x)
-        #     mid_embeddings_2.append(mid_embedding)
             
         preds = []
         trues = []
 
+        SHOW_LOSS_DETAILS = self.args.show_loss_details
+        
         a1, a2, a3, a4 = [], [], [], []
-        all_angels = []
+        # 4 arrays correspond to: loss_before_adapt, loss_selected_samples, loss_selected_samples_adapted, loss_after_adapt
+        all_angles = []
         all_distances = []
+        
+        # extract some hyper-params
+        seq_len = self.args.seq_len
+        label_len = self.args.label_len
+        pred_len = self.args.pred_len
+        adapt_start_pos = self.args.adapt_start_pos
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -1070,12 +1051,18 @@ class Exp_Main(Exp_Basic):
         #     os.makedirs(folder_path)
 
         # load model params
+        # self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
         self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
         self.model.eval()
 
         if weights_given:
             print(f"The given weights is {weights_given}")
             print(f"The length of given weights is {len(weights_given)}")
+        
+        printed_selected_channels = [item+1 for item in self.selected_channels]
+        print(f"adapt_part_channels?: {self.args.adapt_part_channels}")
+        print(f"remove_distance?: {self.args.remove_distance}, remove_cycle?: {self.args.remove_cycle}, remove_nearest: {self.args.remove_nearest}")
+        print(f"first 25 selected_channels are: {printed_selected_channels[:25]}")
         
         
         # as one model will have different outputs under inputs with different batch_size
@@ -1088,12 +1075,14 @@ class Exp_Main(Exp_Basic):
         all_trend_parts = []
         all_revin_means, all_revin_stdevs = [], []
         all_batch_x_lst = []
+        
         file_dir = "./all_mid_embeddings"
         PREFIX = "RevIN_" if self.args.add_revin else ""
         file_name = file_dir + f"/{PREFIX}{setting}.npy"
         trend_file_name = file_dir + f"/{PREFIX}{setting}_trend.npy"
         revin_mean_file_name = file_dir + f"/{PREFIX}{setting}_revin_mean.npy"
         revin_stdev_file_name = file_dir + f"/{PREFIX}{setting}_revin_stdev.npy"
+        
         if os.path.exists(file_name):
             all_mid_embeddings = np.load(file_name)
             if self.args.model != "Informer":
@@ -1107,9 +1096,7 @@ class Exp_Main(Exp_Basic):
             # Note: you should better use batch_size=1 for here.
             # Since we find that one model will have different outputs under inputs with different batch_size
             # A possible explanation is that batch_size will have impact on padding
-            # Reference：https://www.zhihu.com/question/295911908 
-            seq_len = self.args.seq_len
-            pred_len = self.args.pred_len
+            # Reference：https://www.zhihu.com/question/295911908
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(tmp_all_loader):
                 pred, true, mid_embedding, *res = self._process_one_batch_with_model(self.model, test_data,
                         batch_x[:, -seq_len:, :], batch_y, 
@@ -1144,7 +1131,7 @@ class Exp_Main(Exp_Basic):
             all_batch_x_lst = np.vstack(all_batch_x_lst)
         
         # get data length of each segments
-        # manually divide
+        # manually divide, according to data_loader.py in data_provider directory.
         all_len = len(tmp_all_data)
         print("all_len:", all_len)
         original_len = all_len + seq_len + pred_len - 1
@@ -1163,30 +1150,32 @@ class Exp_Main(Exp_Basic):
         # get params of prediction layer
         linear_params = []
         linear_names = []
+        
+        if self.args.model in self.linear_map:
+            linear_name_list = self.linear_map[self.args.model]
+        else:
+            linear_name_list = self.linear_map["default"]
+        
+        # change string to list if need
+        if isinstance(linear_name_list, str):
+            linear_name_list = [linear_name_list]
+        
+        # traverse and get params:
         for n_m, m in self.model.named_modules():
-            if self.args.model == 'ETSformer':
-                linear_layer_name = "decoder.pred"
-            elif self.args.model == 'Crossformer':
-                # There are e_layers+1 of layers in decoder in original Crossformer, so the last layer is self.args.e_layers
-                linear_layer_name = f"decoder.decode_layers.{self.args.e_layers}.linear_pred"
-            elif "Linear" in self.args.model:
-                linear_layer_name = "Linear"
-            elif "PatchTST" in self.args.model:
-                linear_layer_name = "model.head.linear"
-            else:
-                linear_layer_name = "decoder.projection"
-            
-            if linear_layer_name in n_m:
-                for n_p, p in m.named_parameters():
-                    if n_p in ['weight', 'bias']:  # weight is scale, bias is shift
-                        linear_params.append(p)
-                        linear_names.append(f"{n_m}.{n_p}")
+            for linear_name in linear_name_list:
+                # if n_m includes linear_name
+                if linear_name in n_m:
+                    for n_p, p in m.named_parameters():
+                        if n_p in ['weight', 'bias']:  # weight means scale, bias means shift
+                            linear_params.append(p)
+                            linear_names.append(f"{n_m}.{n_p}")
         
         # define a linear projection model, and only fine-tune it
         linear_model = nn.Linear(self.args.d_model, self.args.c_out, bias=True)
         linear_model.requires_grad_(True)
         linear_model.weight = linear_params[0]
         linear_model.bias = linear_params[1]
+        
         
         # self.model.eval()
         for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
@@ -1203,10 +1192,9 @@ class Exp_Main(Exp_Basic):
             cur_revin_mean = all_revin_means[START_INDEX + i : START_INDEX + i + 1]
             cur_revin_stdev = all_revin_stdevs[START_INDEX + i : START_INDEX + i + 1]
             
-            # copy from original linear_model
+            # copy from original linear_model!!! Instead of self.model!!!
             cur_model = copy.deepcopy(linear_model)
             cur_model.eval()
-            
             
             backward_time_start = time.time()
 
@@ -1217,7 +1205,7 @@ class Exp_Main(Exp_Basic):
             for n_m, m in cur_model.named_modules():
                 m.requires_grad_(True)
                 for n_p, p in m.named_parameters():
-                    if n_p in ['weight', 'bias']:  # weight is scale, bias is shift
+                    if n_p in ['weight', 'bias']:  # weight means scale, bias means shift
                         params.append(p)
                         names.append(f"{n_m}.{n_p}")
 
@@ -1240,37 +1228,20 @@ class Exp_Main(Exp_Basic):
             #     print("does not find the same mid_embedding")    
             #     print("does not find the same mid_embedding")    
 
-            # tmp loss
-            # cur_model.eval()
-            seq_len = self.args.seq_len
-            pred_len = self.args.pred_len
-            # adapt_start_pos = self.args.adapt_start_pos
-            pred, true = self._run_linear_model(cur_model, test_data,
-                cur_mid_embedding, batch_y, cur_trend_part,
-                cur_revin_mean, cur_revin_stdev)
-            if self.args.adapt_part_channels:
-                pred = pred[:, :, self.selected_channels]
-                true = true[:, :, self.selected_channels]
-            # loss before adaptation
-            loss_before_adapt = criterion(pred, true)
-            a1.append(loss_before_adapt.item())
-            # cur_model.train()
-            
 
-            # tmp loss
-            # cur_model.eval()
-            seq_len = self.args.seq_len
-            pred_len = self.args.pred_len
-            # adapt_start_pos = self.args.adapt_start_pos
-            pred, true = self._run_linear_model(cur_model, test_data,
-                cur_mid_embedding, batch_y, cur_trend_part,
-                cur_revin_mean, cur_revin_stdev)
-            if self.args.adapt_part_channels:
-                pred = pred[:, :, self.selected_channels]
-                true = true[:, :, self.selected_channels]
-            loss_before_adapt = criterion(pred, true)
-            a1.append(loss_before_adapt.item())
-            # cur_model.train()
+            # a1: record loss before adaptation:
+            if SHOW_LOSS_DETAILS:
+                # cur_model.eval()
+                pred, true = self._run_linear_model(cur_model, test_data,
+                    cur_mid_embedding, batch_y, cur_trend_part,
+                    cur_revin_mean, cur_revin_stdev)
+                if self.args.adapt_part_channels:
+                    pred = pred[:, :, self.selected_channels]
+                    true = true[:, :, self.selected_channels]
+                # loss before adaptation
+                loss_before_adapt = criterion(pred, true)
+                a1.append(loss_before_adapt.item())
+                # cur_model.train()
             
             # ? uncomment this part as well if need
             # print(pred_0.shape, pred.shape)
@@ -1282,43 +1253,36 @@ class Exp_Main(Exp_Basic):
             # assert pred_0.equal(pred)
             # assert (trend_part_0.detach().cpu().clone().numpy() == cur_trend_part).all()
             
-            
-            # # store pred and true
-            # pred_before_adapt = pred.detach().cpu().clone().numpy()
-            # true_before_adapt = true.detach().cpu().clone().numpy()
-            
 
-            if use_adapted_model:
-                seq_len = self.args.seq_len
-                pred_len = self.args.pred_len
-                # adapt_start_pos = self.args.adapt_start_pos
-                pred_answer, true_answer = self._run_linear_model(cur_model, test_data,
-                    cur_mid_embedding, batch_y, cur_trend_part, cur_revin_mean, cur_revin_stdev)
-            
-            if self.args.adapt_part_channels:
-                pred_answer = pred_answer[:, :, self.selected_channels]
-                true_answer = true_answer[:, :, self.selected_channels]
-            loss_ans_before = criterion(pred_answer, true_answer)
-            loss_ans_before.backward()
+            # get gradient of ground-truth as standard answer for the direction of fine-tuning
+            if SHOW_LOSS_DETAILS:
+                if use_adapted_model:
+                    pred_answer, true_answer = self._run_linear_model(cur_model, test_data,
+                        cur_mid_embedding, batch_y, cur_trend_part, cur_revin_mean, cur_revin_stdev)
+                if self.args.adapt_part_channels:
+                    pred_answer = pred_answer[:, :, self.selected_channels]
+                    true_answer = true_answer[:, :, self.selected_channels]
+                loss_ans_before = criterion(pred_answer, true_answer)
+                loss_ans_before.backward()
 
-            w_T = params[0].grad.T
-            b = params[1].grad.unsqueeze(0)
-            params_answer = torch.cat((w_T, b), 0)
-            params_answer = params_answer.ravel()
+                w_T = params[0].grad.T
+                b = params[1].grad.unsqueeze(0)
+                params_answer = torch.cat((w_T, b), 0)
+                params_answer = params_answer.ravel()
 
-            model_optim.zero_grad()
+                model_optim.zero_grad()
+
 
             # record backward time
             backward_time += time.time() - backward_time_start
-
-            # get unselected_channels
-            unselected_channels = list(range(self.args.c_out))
-            for item in self.selected_channels:
-                unselected_channels.remove(item)
             
             # record time for construction contextualized dataset
             construction_time_start = time.time()
-            
+
+            # channels without significant periodicity
+            unselected_channels = list(range(self.args.c_out))
+            for item in self.selected_channels:
+                unselected_channels.remove(item)
             
             import torch.nn.functional as F
             if self.args.adapt_part_channels:  
@@ -1336,7 +1300,7 @@ class Exp_Main(Exp_Basic):
                         lookback_x = batch_x[:, ii : ii+seq_len, :].reshape(-1)
                     dist = F.pairwise_distance(test_x, lookback_x, p=2).item()
                     distance_pairs.append([ii, dist])
-                # randomly selected 'selected_data_num' samples
+                # randomly select 'selected_data_num' samples
                 import random
                 selected_distance_pairs = random.sample(distance_pairs, self.args.selected_data_num)
             else:
@@ -1383,14 +1347,13 @@ class Exp_Main(Exp_Basic):
             construction_time_end = time.time()
             construction_time += construction_time_end - construction_time_start
 
-            cur_grad_list = []
-            
             # record time for adaptation
             adaptation_time_start = time.time()
-            
+
+
+            cur_grad_list = []
             # start training
             for epoch in range(test_train_epochs):
-
                 gradients = []
                 mean_loss = 0
 
@@ -1408,10 +1371,6 @@ class Exp_Main(Exp_Basic):
                     selected_revin_stdev = all_revin_stdevs[(START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) : (START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) + 1]
 
                     model_optim.zero_grad()
-
-                    seq_len = self.args.seq_len
-                    label_len = self.args.label_len
-                    pred_len = self.args.pred_len
 
                     pred, true = self._run_linear_model(cur_model, test_data,
                         selected_mid_embedding, batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :], 
@@ -1474,12 +1433,13 @@ class Exp_Main(Exp_Basic):
 
 
             # calculate the angle between the gradients of ground-truth and the weighted sum of current gradients
-            import math
-            product = torch.dot(weighted_params, params_answer)
-            product = product / (torch.norm(weighted_params) * torch.norm(params_answer))
-            angel = math.degrees(math.acos(product))
-            all_angels.append(angel)
-            
+            if SHOW_LOSS_DETAILS:
+                import math
+                product = torch.dot(weighted_params, params_answer)
+                product = product / (torch.norm(weighted_params) * torch.norm(params_answer))
+                angle = math.degrees(math.acos(product))
+                all_angles.append(angle)
+                
 
             # change 'weighted_params' back to 'w_grad' and 'b_grad'
             weighted_params = weighted_params.reshape(original_shape)
@@ -1503,42 +1463,40 @@ class Exp_Main(Exp_Basic):
 
             # calculate mean loss
             mean_loss = mean_loss / self.args.selected_data_num
-            a2.append(mean_loss.item())
+            # a2: record loss on selected samples before model adaptation.
+            if SHOW_LOSS_DETAILS:
+                a2.append(mean_loss.item())
             
             # record time
             adaptation_time_end = time.time()
             adaptation_time += adaptation_time_end - adaptation_time_start
 
 
-            # # PART 3: check if over-fitting on selected samples           
-            # seq_len = self.args.seq_len
-            # label_len = self.args.label_len
-            # pred_len = self.args.pred_len
-            # tmp_loss = 0
-            # for ii in selected_indices:
-            #     selected_mid_embedding = all_mid_embeddings[(START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) : (START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) + 1]
-            #     selected_trend_part = all_trend_parts[(START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) : (START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) + 1]
-            #     selected_revin_mean = all_revin_means[(START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) : (START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) + 1]
-            #     selected_revin_stdev = all_revin_stdevs[(START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) : (START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) + 1]
-            #     pred, true = self._run_linear_model(cur_model, test_data,
-            #             selected_mid_embedding, batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :],
-            #             selected_trend_part,
-            #             selected_revin_mean, selected_revin_stdev)
-            #     if self.args.adapt_part_channels:
-            #         pred = pred[:, :, self.selected_channels]
-            #         true = true[:, :, self.selected_channels]
-            #     tmp_loss += criterion(pred, true)
-            # tmp_loss = tmp_loss / self.args.selected_data_num
-            # a3.append(tmp_loss.item())
-            a3.append(0)
+            # a3: record loss on selected sample after model adaptation
+            if SHOW_LOSS_DETAILS:
+                tmp_loss = 0
+                for ii in selected_indices:
+                    selected_mid_embedding = all_mid_embeddings[(START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) : (START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) + 1]
+                    selected_trend_part = all_trend_parts[(START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) : (START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) + 1]
+                    selected_revin_mean = all_revin_means[(START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) : (START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) + 1]
+                    selected_revin_stdev = all_revin_stdevs[(START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) : (START_INDEX + i) + (ii - self.test_train_num) - (pred_len-1) + 1]
+                    pred, true = self._run_linear_model(cur_model, test_data,
+                            selected_mid_embedding, batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :],
+                            selected_trend_part,
+                            selected_revin_mean, selected_revin_stdev)
+                    if self.args.adapt_part_channels:
+                        pred = pred[:, :, self.selected_channels]
+                        true = true[:, :, self.selected_channels]
+                    tmp_loss += criterion(pred, true)
+                tmp_loss = tmp_loss / self.args.selected_data_num
+                a3.append(tmp_loss.item())
 
-            # record time fore prediction
+            # 14: record time fore prediction
             prediction_time_start = time.time()
 
+            # a4: record loss after adaptation
             cur_model.eval()
             
-            seq_len = self.args.seq_len
-            pred_len = self.args.pred_len
             if use_adapted_model:
                 if not self.args.use_nearest_data or self.args.use_further_data:
                     pred, true = self._run_linear_model(cur_model, test_data,
@@ -1548,12 +1506,14 @@ class Exp_Main(Exp_Basic):
             if self.args.adapt_part_channels:
                 pred = pred[:, :, self.selected_channels]
                 true = true[:, :, self.selected_channels]
+            
+            # a4: get loss after adaptation
+            if SHOW_LOSS_DETAILS:
+                loss_after_adapt = criterion(pred, true)
+                a4.append(loss_after_adapt.item())
                 
-            pred_after_adapt = pred.detach().cpu().clone().numpy()
-            true_after_adapt = true.detach().cpu().clone().numpy()
-
-            loss_after_adapt = criterion(pred, true)
-            a4.append(loss_after_adapt.item())
+            # pred_after_adapt = pred.detach().cpu().clone().numpy()
+            # true_after_adapt = true.detach().cpu().clone().numpy()
 
             preds.append(pred.detach().cpu().numpy())
             trues.append(true.detach().cpu().numpy())
@@ -1563,68 +1523,23 @@ class Exp_Main(Exp_Basic):
             
             
             rest_time_start = time.time()
-
             if (i+1) % 100 == 0 or (data_len - i) <= 100 and (i+1) % 10 == 0:
                 print("\titers: {0}, cost time: {1}s".format(i + 1, time.time() - test_time_start))
-                print(gradients)
+                # print(gradients)
                 tmp_p = np.array(preds); tmp_p = tmp_p.reshape(-1, tmp_p.shape[-2], tmp_p.shape[-1])
                 tmp_t = np.array(trues); tmp_t = tmp_t.reshape(-1, tmp_t.shape[-2], tmp_t.shape[-1])
                 tmp_mae, tmp_mse, _, _, _ = metric(tmp_p, tmp_t)
                 print('mse:{}, mae:{}'.format(tmp_mse, tmp_mae))
                 
-                avg_1, avg_2, avg_3, avg_4 = 0, 0, 0, 0
-                avg_angel = 0
-                num = len(a1)
-                for iii in range(num):
-                    avg_1 += a1[iii]; avg_2 += a2[iii]; avg_3 += a3[iii]; avg_4 += a4[iii]; avg_angel += all_angels[iii]
-                avg_1 /= num; avg_2 /= num; avg_3 /= num; avg_4 /= num; avg_angel /= num
-                print("1.before_adapt, 2.adapt_sample, 3.adapt_sample_after, 4.after_adapt, 5.angel_between_answer")
-                print("average:", avg_1, avg_2, avg_3, avg_4, avg_angel)
-                print("last one:", a1[-1], a2[-1], a3[-1], a4[-1], all_angels[-1])
-
-                printed_selected_channels = [item+1 for item in self.selected_channels]
-                print(f"adapt_part_channels: {self.args.adapt_part_channels}")
-                print(f"remove_distance: {self.args.remove_distance}, remove_cycle: {self.args.remove_cycle}, remove_nearest: {self.args.remove_nearest}")
-                print(f"first 25th selected_channels: {printed_selected_channels[:25]}")
-                print(f"selected_distance_pairs are: {selected_distance_pairs}")
-
-            # # Draw figures for prediction results after adaptation:
-            # # print("bacth_x.shape:", batch_x.detach().cpu().numpy().shape)
-            # # print("pred_before_adapt.shape", pred_before_adapt.shape)
-            # # print("pred_after_adapt.shape", pred_after_adapt.shape)
-            # interval = 20 if 'illness' in self.args.data_path else 50
-            # if i % interval == 0:
-            #     # if need draw figures for prediction after adaptation
-            #     if self.args.draw_adapt_figure:
-            #         folder_path = './test_results/' + setting + '/'
-            #         if not os.path.exists(folder_path):
-            #             os.makedirs(folder_path)
+                # show detais of loss during adaptation:
+                if SHOW_LOSS_DETAILS:
+                    avg_1, avg_2, avg_3, avg_4 = sum(a1)/len(a1), sum(a2)/len(a2), sum(a3)/len(a3), sum(a4)/len(a4)
+                    avg_angle = sum(all_angles) / len(all_angles)
+                    print("1.before_adapt, 2.adapt_sample, 3.adapt_sample_after, 4.after_adapt, 5.angle_between_answer")
+                    print("average:", avg_1, avg_2, avg_3, avg_4, avg_angle)
+                    print("last one:", a1[-1], a2[-1], a3[-1], a4[-1], all_angles[-1])
+                    print(f"selected_distance_pairs are: {selected_distance_pairs}")
             
-            #         # Since actual length of batch_x is 'ttn+pred_len+seq_len', so we need to extract the last [:, -seq_len:, :] part!
-            #         # And since illness is far too short, we will preserve more data for visualization
-            #         if not 'illness' in self.args.data_path:
-            #             input = batch_x[:, -self.args.seq_len:, :]
-            #         else:
-            #             input = batch_x[:, -3*self.args.seq_len:, :]
-            #             # input = batch_x[:, :, :]
-            #         input = input.detach().cpu().numpy()
-            #         # print(batch_x.shape, input.shape, self.args.seq_len)
-            #         assert (true_before_adapt == true_after_adapt).all()
-                    
-            #         gt = np.concatenate((input[0, :, -1], true_before_adapt[0, :, -1]), axis=0)
-            #         pd_before_adapt = np.concatenate((input[0, :, -1], pred_before_adapt[0, :, -1]), axis=0)
-            #         pd_after_adapt = np.concatenate((input[0, :, -1], pred_after_adapt[0, :, -1]), axis=0)
-                    
-            #         name = os.path.join(folder_path, str(i) + '.pdf')
-            #         plt.figure()
-            #         # give a bigger zorder to ground-truth, to make it at the top
-            #         plt.plot(gt, label='GroundTruth', linewidth=2, zorder=3)
-            #         if pd_before_adapt is not None:
-            #             plt.plot(pd_before_adapt, label='Before adaptation', linewidth=2, zorder=1)
-            #         if pd_after_adapt is not None:
-            #             plt.plot(pd_after_adapt, label='After adaptation', linewidth=2, zorder=2)
-            #         plt.legend()
-            #         plt.savefig(name, bbox_inches='tight')
 
             cur_model.eval()
             # cur_model.cpu()
@@ -1679,6 +1594,7 @@ class Exp_Main(Exp_Basic):
         data_len = len(test_data)
         if test:
             print('loading model from checkpoint !!!')
+            # self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
             self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
 
         self.model.eval()
@@ -1686,8 +1602,18 @@ class Exp_Main(Exp_Basic):
         preds = []
         trues = []
 
+        SHOW_LOSS_DETAILS = self.args.show_loss_details
+        
         a1, a2, a3, a4 = [], [], [], []
+        # 4 arrays correspond to: loss_before_adapt, loss_selected_samples, loss_selected_samples_adapted, loss_after_adapt
         all_distances = []
+        
+        # extract some hyper-params
+        seq_len = self.args.seq_len
+        label_len = self.args.label_len
+        pred_len = self.args.pred_len
+        adapt_start_pos = self.args.adapt_start_pos
+        
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -1695,13 +1621,19 @@ class Exp_Main(Exp_Basic):
         criterion = nn.MSELoss()
         test_time_start = time.time()
 
+        # self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
         self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'), map_location='cuda:0'))
 
         if weights_given:
             print(f"The given weights is {weights_given}")
             print(f"The length of given weights is {len(weights_given)}")
         
-
+        printed_selected_channels = [item+1 for item in self.selected_channels]
+        print(f"adapt_part_channels?: {self.args.adapt_part_channels}")
+        print(f"remove_distance?: {self.args.remove_distance}, remove_cycle?: {self.args.remove_cycle}, remove_nearest: {self.args.remove_nearest}")
+        print(f"first 25 selected_channels are: {printed_selected_channels[:25]}")
+        
+        
         # self.model.eval()
         for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
             if (data_len - i) <= data_len % self.args.batch_size: break
@@ -1714,64 +1646,59 @@ class Exp_Main(Exp_Basic):
             if is_training_part_params:
                 params = []
                 names = []
-                params_norm = []
-                names_norm = []
                 cur_model.requires_grad_(False)
+                
+                if self.args.model in self.linear_map:
+                    linear_name_list = self.linear_map[self.args.model]
+                else:
+                    linear_name_list = self.linear_map["default"]
+                
+                # change string to list if need
+                if isinstance(linear_name_list, str):
+                    linear_name_list = [linear_name_list]
+                
+                # traverse and get params:
                 for n_m, m in cur_model.named_modules():
-                    # TODO: 这里改成map形式，用if-else-if太冗余了！！！
-                    if self.args.model == 'ETSformer':
-                        linear_layer_name = "decoder.pred"
-                    elif self.args.model == 'Crossformer':
-                        # There are e_layers+1 of layers in decoder in original Crossformer, so the last layer is self.args.e_layers
-                        linear_layer_name = f"decoder.decode_layers.{self.args.e_layers}.linear_pred"
-                    elif "Linear" in self.args.model:
-                        linear_layer_name = "Linear"
-                    elif "PatchTST" in self.args.model:
-                        linear_layer_name = "model.head.linear"
-                    else:
-                        linear_layer_name = "decoder.projection"
-                    
-                    if linear_layer_name in n_m:
-                        m.requires_grad_(True)
-                        for n_p, p in m.named_parameters():
-                            if n_p in ['weight', 'bias']:  # weight is scale, bias is shift
-                                params.append(p)
-                                names.append(f"{n_m}.{n_p}")
+                    for linear_name in linear_name_list:
+                        # if n_m includes linear_name
+                        if linear_name in n_m:
+                            m.requires_grad_(True)
+                            for n_p, p in m.named_parameters():
+                                if n_p in ['weight', 'bias']:  # weight means scale, bias means shift
+                                    params.append(p)
+                                    names.append(f"{n_m}.{n_p}")
 
-                # set lr:
+                # set lr & change Adam to SGD optimizer:
                 lr = self.args.learning_rate * self.args.adapted_lr_times
-                # changing Adam to SGD optimizer:
                 model_optim = optim.SGD(params, lr=lr)  # model_optim = optim.Adam(params, lr=lr)
             else:
                 cur_model.requires_grad_(True)
-                # set lr:
+                # set lr & change Adam to SGD optimizer:
                 lr = self.args.learning_rate * self.args.adapted_lr_times
-                model_optim = optim.SGD(cur_model.parameters(), lr=lr)
+                model_optim = optim.SGD(cur_model.parameters(), lr=lr)  # model_optim = optim.Adam(cur_model.parameters(), lr=lr)
             
             
-            # tmp loss
-            # cur_model.eval()
-            seq_len = self.args.seq_len
-            pred_len = self.args.pred_len
-            adapt_start_pos = self.args.adapt_start_pos
-            if not self.args.use_nearest_data or self.args.use_further_data:
-                pred, true = self._process_one_batch_with_model(cur_model, test_data,
-                    batch_x[:, -seq_len:, :], batch_y, 
-                    batch_x_mark[:, -seq_len:, :], batch_y_mark)
-            else:
-                pred, true = self._process_one_batch_with_model(cur_model, test_data,
-                    batch_x[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y, 
-                    batch_x_mark[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y_mark)
-            if self.args.adapt_part_channels:
-                pred = pred[:, :, self.selected_channels]
-                true = true[:, :, self.selected_channels]
-            # get loss before adaptation
-            loss_before_adapt = criterion(pred, true)
-            a1.append(loss_before_adapt.item())
-            # cur_model.train()
+            # a1: record loss before adaptation:
+            if SHOW_LOSS_DETAILS:
+                # cur_model.eval()
+                if not self.args.use_nearest_data or self.args.use_further_data:
+                    pred, true = self._process_one_batch_with_model(cur_model, test_data,
+                        batch_x[:, -seq_len:, :], batch_y, 
+                        batch_x_mark[:, -seq_len:, :], batch_y_mark)
+                else:
+                    pred, true = self._process_one_batch_with_model(cur_model, test_data,
+                        batch_x[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y, 
+                        batch_x_mark[:, -((pred_len - adapt_start_pos) + seq_len):-(pred_len - adapt_start_pos), :], batch_y_mark)
+                if self.args.adapt_part_channels:
+                    pred = pred[:, :, self.selected_channels]
+                    true = true[:, :, self.selected_channels]
+                # get loss before adaptation
+                loss_before_adapt = criterion(pred, true)
+                a1.append(loss_before_adapt.item())
+                # cur_model.train()
         
 
-            # get unselected channels
+            # channels without significant periodicity
             unselected_channels = list(range(self.args.c_out))
             for item in self.selected_channels:
                 unselected_channels.remove(item)
@@ -1799,7 +1726,7 @@ class Exp_Main(Exp_Basic):
             else:
                 for ii in range(self.args.test_train_num):
                     # remove_cycle is used for ablation study
-                    if not self.argslambdaer.remove_cycle:
+                    if not self.args.remove_cycle:
                         # phase difference between current sample and test sample
                         if 'illness' in self.args.data_path:
                             import math
@@ -1836,21 +1763,12 @@ class Exp_Main(Exp_Basic):
             all_distances.append(selected_distances)
 
             cur_grad_list = []
-            
             for epoch in range(test_train_epochs):
-                
-                accpted_samples_num = set()
-
-                # num_of_loss_per_update = 1
                 mean_loss = 0
 
                 for ii in selected_indices:
 
                     model_optim.zero_grad()
-
-                    seq_len = self.args.seq_len
-                    label_len = self.args.label_len
-                    pred_len = self.args.pred_len
 
                     pred, true = self._process_one_batch_with_model(cur_model, test_data,
                         batch_x[:, ii : ii+seq_len, :], batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :], 
@@ -1885,34 +1803,32 @@ class Exp_Main(Exp_Basic):
                         loss.backward()
                         model_optim.step()
             
-
-            # mean_loss = mean_loss / self.test_train_num
+            
+            # calculate mean loss
             mean_loss = mean_loss / self.args.selected_data_num
-            a2.append(mean_loss.item())
+            # a2: record loss on selected samples before model adaptation.
+            if SHOW_LOSS_DETAILS:
+                a2.append(mean_loss.item())
 
 
-            # seq_len = self.args.seq_len
-            # label_len = self.args.label_len
-            # pred_len = self.args.pred_len
-            # tmp_loss = 0
-            # for ii in selected_indices:
-            #     pred, true = self._process_one_batch_with_model(cur_model, test_data,
-            #         batch_x[:, ii : ii+seq_len, :], batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :], 
-            #         batch_x_mark[:, ii : ii+seq_len, :], batch_x_mark[:, ii+seq_len-label_len : ii+seq_len+pred_len, :])
-            #     if self.args.adapt_part_channels:
-            #         pred = pred[:, :, self.selected_channels]
-            #         true = true[:, :, self.selected_channels]
-            #     tmp_loss += criterion(pred, true)
-            # tmp_loss = tmp_loss / self.args.selected_data_num
-            # a3.append(tmp_loss.item())
-            a3.append(0)
+            # a3: record loss on selected sample after model adaptation
+            if SHOW_LOSS_DETAILS:
+                tmp_loss = 0
+                for ii in selected_indices:
+                    pred, true = self._process_one_batch_with_model(cur_model, test_data,
+                        batch_x[:, ii : ii+seq_len, :], batch_x[:, ii+seq_len-label_len : ii+seq_len+pred_len, :], 
+                        batch_x_mark[:, ii : ii+seq_len, :], batch_x_mark[:, ii+seq_len-label_len : ii+seq_len+pred_len, :])
+                    if self.args.adapt_part_channels:
+                        pred = pred[:, :, self.selected_channels]
+                        true = true[:, :, self.selected_channels]
+                    tmp_loss += criterion(pred, true)
+                tmp_loss = tmp_loss / self.args.selected_data_num
+                a3.append(tmp_loss.item())
 
 
+            # a4: record loss after adaptation
             cur_model.eval()
 
-            seq_len = self.args.seq_len
-            pred_len = self.args.pred_len
-            adapt_start_pos = self.args.adapt_start_pos
             if use_adapted_model:
                 if not self.args.use_nearest_data or self.args.use_further_data:
                     pred, true = self._process_one_batch_with_model(cur_model, test_data,
@@ -1927,12 +1843,14 @@ class Exp_Main(Exp_Basic):
                 pred = pred[:, :, self.selected_channels]
                 true = true[:, :, self.selected_channels]
 
-            # get loss after adaptation
-            loss_after_adapt = criterion(pred, true)
-            a4.append(loss_after_adapt.item())
+            # a4: get loss after adaptation
+            if SHOW_LOSS_DETAILS:
+                loss_after_adapt = criterion(pred, true)
+                a4.append(loss_after_adapt.item())
 
             preds.append(pred.detach().cpu().numpy())
             trues.append(true.detach().cpu().numpy())
+
 
             if (i+1) % 100 == 0 or (data_len - i) <= 100 and (i+1) % 10 == 0:
                 print("\titers: {0}, cost time: {1}s".format(i + 1, time.time() - test_time_start))
@@ -1941,20 +1859,14 @@ class Exp_Main(Exp_Basic):
                 tmp_mae, tmp_mse, _, _, _ = metric(tmp_p, tmp_t)
                 print('mse:{}, mae:{}'.format(tmp_mse, tmp_mae))
                 
-                avg_1, avg_2, avg_3, avg_4 = 0, 0, 0, 0
-                num = len(a1)
-                for iii in range(num):
-                    avg_1 += a1[iii]; avg_2 += a2[iii]; avg_3 += a3[iii]; avg_4 += a4[iii]
-                avg_1 /= num; avg_2 /= num; avg_3 /= num; avg_4 /= num
-                print("1.before_adapt, 2.adapt_sample, 3.adapt_sample_after, 4.after_adapt")
-                print("average:", avg_1, avg_2, avg_3, avg_4)
-                print("last one:", a1[-1], a2[-1], a3[-1], a4[-1])
-
-                printed_selected_channels = [item+1 for item in self.selected_channels]
-                print(f"adapt_part_channels: {self.args.adapt_part_channels}")
-                print(f"remove_distance: {self.args.remove_distance}, remove_cycle: {self.args.remove_cycle}, remove_nearest: {self.args.remove_nearest}")
-                print(f"first 25th selected_channels: {printed_selected_channels[:25]}")
-                print(f"selected_distance_pairs are: {selected_distance_pairs}")
+                # show detais of loss during adaptation:
+                if SHOW_LOSS_DETAILS:
+                    avg_1, avg_2, avg_3, avg_4 = sum(a1)/len(a1), sum(a2)/len(a2), sum(a3)/len(a3), sum(a4)/len(a4)
+                    # avg_angle = sum(all_angles) / len(all_angles)
+                    print("1.before_adapt, 2.adapt_sample, 3.adapt_sample_after, 4.after_adapt:")
+                    print("average:", avg_1, avg_2, avg_3, avg_4)
+                    print("last one:", a1[-1], a2[-1], a3[-1], a4[-1])
+                    print(f"selected_distance_pairs are: {selected_distance_pairs}")
 
 
             # if i % 20 == 0:
@@ -1968,6 +1880,7 @@ class Exp_Main(Exp_Basic):
             del cur_model
             torch.cuda.empty_cache()
 
+        
         preds = np.array(preds)
         trues = np.array(trues)
         print('test shape:', preds.shape, trues.shape)
